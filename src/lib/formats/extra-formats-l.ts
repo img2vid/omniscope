@@ -1,0 +1,32 @@
+import type { RawFormat } from "@/lib/types";
+
+/** AUTHORED EXPANSION L — phone backups, VMs, screen recorders, misc apps. */
+export const EXTRA_FORMATS_L: RawFormat[] = [
+  { ext: ["nbu"], name: "Nokia Phone Backup", cat: "archive", viewer: "fallback" },
+  { ext: ["bbb"], name: "BlackBerry Backup", cat: "archive", viewer: "fallback" },
+  { ext: ["vmtm"], name: "VMware Team Data", cat: "system", viewer: "fallback" },
+  { ext: ["pvm"], name: "Parallels Virtual Machine", cat: "system", viewer: "fallback" },
+  { ext: ["vbox-prev"], name: "VirtualBox Machine", cat: "system", viewer: "xml" },
+  { ext: ["camproj", "trec"], name: "Camtasia Project/Recording", cat: "video", viewer: "fallback" },
+  { ext: ["pyd"], name: "Python DLL Module", cat: "system", viewer: "exe", sig: "4D 5A" },
+  { ext: ["pyz", "pyzw"], name: "Python Zipapp", cat: "system", viewer: "archive", sig: "50 4B 03 04" },
+  { ext: ["jnt"], name: "Windows Journal Note", cat: "document", viewer: "fallback" },
+  { ext: ["nco"], name: "Nero BackItUp", cat: "archive", viewer: "fallback" },
+  { ext: ["rdp"], name: "Remote Desktop Connection", cat: "config", viewer: "text" },
+  { ext: ["wbcat"], name: "Windows Backup Catalog", cat: "system", viewer: "fallback" },
+  { ext: ["zfsendtotarget"], name: "Compressed Folder SendTo", cat: "archive", viewer: "archive", sig: "50 4B 03 04" },
+  { ext: ["laccdb"], name: "Access Lock Database", cat: "database", viewer: "fallback" },
+  { ext: ["aip", "aman", "approj"], name: "Advanced Installer Project", cat: "system", viewer: "xml" },
+  { ext: ["zsync"], name: "Zsync Control File", cat: "data", viewer: "text" },
+  { ext: ["c32"], name: "Syslinux COM32 Module", cat: "system", viewer: "fallback" },
+  { ext: ["kfx"], name: "Kindle KFX eBook", cat: "ebook", viewer: "fallback" },
+  { ext: ["mydocs"], name: "My Docs Folder", cat: "other", viewer: "fallback" },
+  { ext: ["volume"], name: "KDE Plasma Service File", cat: "config", viewer: "text" },
+  { ext: ["playlist"], name: "Generic Playlist", cat: "audio", viewer: "text" },
+  { ext: ["efx"], name: "eFax Document", cat: "document", viewer: "fallback" },
+  { ext: ["snp"], name: "Access Snapshot", cat: "document", viewer: "fallback" },
+  { ext: ["adn"], name: "Access Blank Template", cat: "database", viewer: "fallback" },
+  { ext: ["bpk"], name: "Borland Package", cat: "system", viewer: "fallback" },
+  { ext: ["bpl"], name: "Borland Package Library", cat: "system", viewer: "exe", sig: "4D 5A" },
+  { ext: ["ppu"], name: "Free Pascal Unit", cat: "system", viewer: "fallback" },
+];
