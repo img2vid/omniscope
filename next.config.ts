@@ -1,12 +1,11 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  output: "standalone",
-  /* config options here */
-  typescript: {
-    ignoreBuildErrors: true,
+  output: 'export', // Tells Next.js to create static HTML files for GitHub Pages
+  basePath: '/omniscope', // Tells the app it lives in the /omniscope folder
+  images: {
+    unoptimized: true, // REQUIRED: GitHub Pages cannot optimize Next.js images automatically
   },
-  reactStrictMode: false,
 };
 
 export default nextConfig;
