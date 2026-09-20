@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "Yes, the file table displays rows with subtle alternating zebra row backgrounds to distinguish between the entries.",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1789905101,
+  "id": "202609201951403c4d615b2b6543e1",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "202609201951403c4d615b2b6543e1",
+  "usage": {
+    "completion_tokens": 21,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 914,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 935
+  }
+}

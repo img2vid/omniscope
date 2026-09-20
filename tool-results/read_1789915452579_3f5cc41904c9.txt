@@ -1,0 +1,1233 @@
+     1→"use client";
+     2→
+     3→import * as React from "react";
+     4→import {
+     5→  ViewerToolbar, ToolButton, ToolbarDivider, Chip, LoadingState, ErrorCard, Segmented,
+     6→} from "@/components/viewers/viewer-ui";
+     7→import { cn, formatBytes, toHexByte } from "@/lib/utils";
+     8→import {
+     9→  diffLines, textDiffStats, buildUnifiedPatch, splitLines, decodeTextual, looksTextual, wordDiff,
+    10→  type LineOp, type TextDiffStats, type WordDiffResult,
+    11→} from "@/lib/textdiff";
+    12→import {
+    13→  loadHljs, detectLang, autoDetectLang, tokenizeLines, sliceTokens, type LineTok,
+    14→} from "@/lib/hlsyntax";
+    15→import {
+    16→  GitCompare, ArrowLeftRight, X, ChevronLeft, ChevronRight, Equal, AlertTriangle,
+    17→  Loader2, FileDiff, Copy, Check, Download, WrapText, Rows3, Columns2, Plus, Minus, Highlighter,
+    18→  Code2,
+    19→} from "lucide-react";
+    20→
+    21→const PAGE = 4096; // bytes per page
+    22→const ROW = 16; // bytes per row
+    23→const COMPARE_CAP = 128 * 1024 * 1024; // full-compare window cap per side
+    24→const TEXT_CAP = 8 * 1024 * 1024; // text-mode decode cap per side
+    25→const LINE_CAP = 60_000; // text-mode line cap per side
+    26→const CTX = 3; // context lines kept around changes
+    27→const COLLAPSE_OVER = 8; // equal runs longer than this get collapsed
+    28→const ROWS_PER_PAGE = 4000; // rendered-row pagination
+    29→const SYNTAX_CHAR_CAP = 400_000; // per-side char cap for hl.js tokenization
+    30→const SYNTAX_LINE_CAP = 20_000; // per-side line cap for hl.js tokenization
+    31→
+    32→/* hl.js token palette scoped to .dxhl (mirrors the code viewer — no blue/indigo) */
+    33→const HL_PALETTE_CSS = `
+    34→.dxhl .hljs-keyword, .dxhl .hljs-selector-tag, .dxhl .hljs-built_in, .dxhl .hljs-doctag { color: #6ee7b7; }
+    35→.dxhl .hljs-string, .dxhl .hljs-regexp, .dxhl .hljs-quote { color: #fcd34d; }
+    36→.dxhl .hljs-number, .dxhl .hljs-literal { color: #fda4af; }
+    37→.dxhl .hljs-comment { color: #71717a; font-style: italic; }
+    38→.dxhl .hljs-title, .dxhl .hljs-name, .dxhl .hljs-type, .dxhl .hljs-class, .dxhl .hljs-selector-id, .dxhl .hljs-selector-class { color: #5eead4; }
+    39→.dxhl .hljs-attr, .dxhl .hljs-attribute, .dxhl .hljs-variable, .dxhl .hljs-template-variable, .dxhl .hljs-params { color: #c4b5fd; }
+    40→.dxhl .hljs-symbol, .dxhl .hljs-bullet, .dxhl .hljs-meta, .dxhl .hljs-meta .hljs-keyword { color: #fdba74; }
+    41→.dxhl .hljs-section, .dxhl .hljs-emphasis { font-style: italic; }
+    42→.dxhl .hljs-strong { font-weight: 600; }
+    43→.dxhl .hljs-addition { color: #a7f3d0; }
+    44→.dxhl .hljs-deletion { color: #fecdd3; }
+    45→.dxhl .hljs-link { color: #5eead4; text-decoration: underline; }
+    46→`;
+    47→
+    48→export interface DiffHunk {
+    49→  start: number;
+    50→  /** exclusive end */
+    51→  end: number;
+    52→  /** true when this hunk represents the tail of the longer file (past the shorter file's EOF) */
+    53→  tail: boolean;
+    54→}
+    55→
+    56→/**
+    57→ * Compute contiguous differing regions between two byte arrays.
+    58→ * Runs closer than 16 bytes are merged into one hunk. The length difference
+    59→ * (bytes past min(lenA, lenB)) becomes a final hunk flagged with tail=true.
+    60→ */
+    61→export function computeDiffHunks(a: Uint8Array, b: Uint8Array): DiffHunk[] {
+    62→  const n = Math.min(a.length, b.length);
+    63→  const hunks: DiffHunk[] = [];
+    64→  let cur: DiffHunk | null = null;
+    65→  let gap = 0;
+    66→  for (let i = 0; i < n; i++) {
+    67→    if (a[i] !== b[i]) {
+    68→      if (cur && gap > 0 && gap < 16 && cur.end === i - gap) {
+    69→        // extend current hunk across the small gap
+    70→        cur.end = i + 1;
+    71→      } else {
+    72→        if (cur) hunks.push(cur);
+    73→        cur = { start: i, end: i + 1, tail: false };
+    74→      }
+    75→      gap = 0;
+    76→    } else if (cur) {
+    77→      gap++;
+    78→    }
+    79→    if (hunks.length >= 5000) break;
+    80→  }
+    81→  if (cur) hunks.push(cur);
+    82→  const maxLen = Math.max(a.length, b.length);
+    83→  if (maxLen > n) hunks.push({ start: n, end: maxLen, tail: true });
+    84→  return hunks;
+    85→}
+    86→
+    87→interface SyntaxState {
+    88→  lang: string;
+    89→  tokA: LineTok[][] | null;
+    90→  tokB: LineTok[][] | null;
+    91→  capped: boolean;
+    92→}
+    93→
+    94→interface SlotState {
+    95→  file: File | null;
+    96→  bytes: Uint8Array | null;
+    97→  hash: string | null;
+    98→  reading: boolean;
+    99→  truncated: boolean;
+   100→}
+   101→
+   102→const emptySlot: SlotState = { file: null, bytes: null, hash: null, reading: false, truncated: false };
+   103→
+   104→async function sha256Chunks(file: File, cap: number, onProgress?: (done: number) => void): Promise<string> {
+   105→  const limit = Math.min(file.size, cap);
+   106→  const parts: ArrayBuffer[] = [];
+   107→  const CH = 8 * 1024 * 1024;
+   108→  for (let off = 0; off < limit; off += CH) {
+   109→    const end = Math.min(off + CH, limit);
+   110→    parts.push(await file.slice(off, end).arrayBuffer());
+   111→    onProgress?.(Math.min(end, limit));
+   112→  }
+   113→  const total = parts.reduce((s, p) => s + p.byteLength, 0);
+   114→  const merged = new Uint8Array(total);
+   115→  let pos = 0;
+   116→  for (const p of parts) { merged.set(new Uint8Array(p), pos); pos += p.byteLength; }
+   117→  const dig = await crypto.subtle.digest("SHA-256", merged);
+   118→  return Array.from(new Uint8Array(dig)).map((x) => x.toString(16).padStart(2, "0")).join("");
+   119→}
+   120→
+   121→function hexOffset(n: number): string {
+   122→  return "0x" + n.toString(16).toUpperCase().padStart(8, "0");
+   123→}
+   124→
+   125→/* ------------------------------ text-mode model ------------------------------ */
+   126→
+   127→interface TextSide {
+   128→  lines: string[];
+   129→  enc: string;
+   130→  truncatedBytes: boolean;
+   131→  truncatedLines: boolean;
+   132→  noNewline: boolean;
+   133→}
+   134→
+   135→function buildTextSide(bytes: Uint8Array): TextSide {
+   136→  const truncatedBytes = bytes.length > TEXT_CAP;
+   137→  const slice = truncatedBytes ? bytes.subarray(0, TEXT_CAP) : bytes;
+   138→  const dec = decodeTextual(slice);
+   139→  const all = splitLines(dec.text);
+   140→  const truncatedLines = all.length > LINE_CAP;
+   141→  const lines = truncatedLines ? all.slice(0, LINE_CAP) : all;
+   142→  return {
+   143→    lines,
+   144→    enc: dec.enc,
+   145→    truncatedBytes,
+   146→    truncatedLines,
+   147→    noNewline: dec.text.length > 0 && !/[\r\n]$/.test(dec.text),
+   148→  };
+   149→}
+   150→
+   151→type USegItem = { op: LineOp; i: number };
+   152→
+   153→type USeg =
+   154→  | { type: "rows"; items: USegItem[]; block?: number }
+   155→  | { type: "gap"; from: number; to: number; count: number; id: number };
+   156→
+   157→interface SRow {
+   158→  kind: "eq" | "del" | "ins" | "mod";
+   159→  aN?: number;
+   160→  aText?: string;
+   161→  bN?: number;
+   162→  bText?: string;
+   163→  aParts?: WordPartView[];
+   164→  bParts?: WordPartView[];
+   165→  block?: number;
+   166→}
+   167→
+   168→type WordPartView = { text: string; changed: boolean };
+   169→
+   170→export function DiffView({ initialA, initialB, onClose }: {
+   171→  initialA?: File | null;
+   172→  initialB?: File | null;
+   173→  onClose: () => void;
+   174→}): React.JSX.Element {
+   175→  const [slotA, setSlotA] = React.useState<SlotState>(initialA ? { ...emptySlot, file: initialA } : emptySlot);
+   176→  const [slotB, setSlotB] = React.useState<SlotState>(initialB ? { ...emptySlot, file: initialB } : emptySlot);
+   177→  const [scan, setScan] = React.useState<{ equal: number; hunks: DiffHunk[]; firstDiff: number | null; windowBytes: number } | null>(null);
+   178→  const [hashErr, setHashErr] = React.useState<string | null>(null);
+   179→  const [page, setPage] = React.useState(0);
+   180→  const [curHunk, setCurHunk] = React.useState(-1);
+   181→  const [jump, setJump] = React.useState("");
+   182→  const [jumpErr, setJumpErr] = React.useState("");
+   183→  const [copied, setCopied] = React.useState(false);
+   184→  const [dmode, setDmode] = React.useState<"bytes" | "text">("bytes");
+   185→  const [textView, setTextView] = React.useState<"unified" | "split">("unified");
+   186→  const [wrap, setWrap] = React.useState(false);
+   187→  const [wordHl, setWordHl] = React.useState(true);
+   188→  const [syntaxOn, setSyntaxOn] = React.useState(true);
+   189→  const [syntax, setSyntax] = React.useState<SyntaxState | null>(null);
+   190→  const [curBlock, setCurBlock] = React.useState(0);
+   191→  const [expandedGaps, setExpandedGaps] = React.useState<ReadonlySet<number>>(new Set());
+   192→  const [shownRows, setShownRows] = React.useState(ROWS_PER_PAGE);
+   193→  const [patchCopied, setPatchCopied] = React.useState(false);
+   194→  const modeTouched = React.useRef(false);
+   195→  const inputA = React.useRef<HTMLInputElement>(null);
+   196→  const inputB = React.useRef<HTMLInputElement>(null);
+   197→
+   198→  /* read + hash each slot whenever its file changes */
+   199→  React.useEffect(() => {
+   200→    const file = slotA.file;
+   201→    if (!file) return;
+   202→    let cancelled = false;
+   203→    setSlotA((s) => ({ ...s, reading: true, bytes: null, hash: null, truncated: file.size > COMPARE_CAP }));
+   204→    (async () => {
+   205→      try {
+   206→        const want = Math.min(file.size, COMPARE_CAP);
+   207→        const bytes = new Uint8Array(await file.slice(0, want).arrayBuffer());
+   208→        const hash = await sha256Chunks(file, COMPARE_CAP);
+   209→        if (!cancelled) setSlotA((s) => ({ ...s, bytes, hash, reading: false }));
+   210→      } catch (e) {
+   211→        if (!cancelled) { setSlotA((s) => ({ ...s, reading: false })); setHashErr(String(e)); }
+   212→      }
+   213→    })();
+   214→    return () => { cancelled = true; };
+   215→  }, [slotA.file]);
+   216→
+   217→  React.useEffect(() => {
+   218→    const file = slotB.file;
+   219→    if (!file) return;
+   220→    let cancelled = false;
+   221→    setSlotB((s) => ({ ...s, reading: true, bytes: null, hash: null, truncated: file.size > COMPARE_CAP }));
+   222→    (async () => {
+   223→      try {
+   224→        const want = Math.min(file.size, COMPARE_CAP);
+   225→        const bytes = new Uint8Array(await file.slice(0, want).arrayBuffer());
+   226→        const hash = await sha256Chunks(file, COMPARE_CAP);
+   227→        if (!cancelled) setSlotB((s) => ({ ...s, bytes, hash, reading: false }));
+   228→      } catch (e) {
+   229→        if (!cancelled) { setSlotB((s) => ({ ...s, reading: false })); setHashErr(String(e)); }
+   230→      }
+   231→    })();
+   232→    return () => { cancelled = true; };
+   233→  }, [slotB.file]);
+   234→
+   235→  /* reset view state when either file changes */
+   236→  React.useEffect(() => {
+   237→    setExpandedGaps(new Set());
+   238→    setShownRows(ROWS_PER_PAGE);
+   239→    setCurBlock(0);
+   240→  }, [slotA.file, slotB.file]);
+   241→
+   242→  /* auto mode: text when both sides look textual (until the user picks manually) */
+   243→  React.useEffect(() => {
+   244→    if (modeTouched.current) return;
+   245→    const a = slotA.bytes, b = slotB.bytes;
+   246→    if (a && b && a.length > 0 && b.length > 0) {
+   247→      setDmode(looksTextual(a) && looksTextual(b) ? "text" : "bytes");
+   248→    }
+   249→  }, [slotA.bytes, slotB.bytes]);
+   250→
+   251→  const busy = slotA.reading || slotB.reading;
+   252→
+   253→  /* scan for differences once both sides are ready */
+   254→  React.useEffect(() => {
+   255→    if (busy || !slotA.bytes || !slotB.bytes) { setScan(null); return; }
+   256→    const a = slotA.bytes, b = slotB.bytes;
+   257→    const n = Math.min(a.length, b.length);
+   258→    let equal = 0;
+   259→    for (let i = 0; i < n; i++) if (a[i] === b[i]) equal++;
+   260→    const hunks = computeDiffHunks(a, b);
+   261→    const firstDiff = hunks.length && !hunks[0].tail ? hunks[0].start : (hunks.length ? hunks[0].start : null);
+   262→    setScan({ equal, hunks, firstDiff, windowBytes: Math.max(a.length, b.length) });
+   263→    setPage(0);
+   264→    setCurHunk(hunks.length ? 0 : -1);
+   265→  }, [busy, slotA.bytes, slotB.bytes]);
+   266→
+   267→  /* ---------------- text-mode derived state ---------------- */
+   268→
+   269→  const textA = React.useMemo(() => (dmode === "text" && slotA.bytes && slotA.bytes.length ? buildTextSide(slotA.bytes) : null), [dmode, slotA.bytes]);
+   270→  const textB = React.useMemo(() => (dmode === "text" && slotB.bytes && slotB.bytes.length ? buildTextSide(slotB.bytes) : null), [dmode, slotB.bytes]);
+   271→
+   272→  const textDiff = React.useMemo<{ ops: LineOp[]; stats: TextDiffStats; error: string | null } | null>(() => {
+   273→    if (!textA || !textB) return null;
+   274→    try {
+   275→      const ops = diffLines(textA.lines, textB.lines);
+   276→      return { ops, stats: textDiffStats(ops), error: null };
+   277→    } catch (e) {
+   278→      return {
+   279→        ops: [],
+   280→        stats: { added: 0, removed: 0, changed: 0, equal: 0, hunks: 0 },
+   281→        error: e instanceof Error ? e.message : String(e),
+   282→      };
+   283→    }
+   284→  }, [textA, textB]);
+   285→
+   286→  /* syntax highlighting for text mode: language from A's filename (auto fallback),
+   287→     whole-text tokenization into per-line token arrays (capped for performance) */
+   288→  React.useEffect(() => {
+   289→    if (dmode !== "text" || !textA || !textB || !slotA.file || !slotB.file) { setSyntax(null); return; }
+   290→    let cancelled = false;
+   291→    (async () => {
+   292→      const hljs = await loadHljs();
+   293→      if (cancelled || !hljs) { if (!cancelled) setSyntax(null); return; }
+   294→      let lang = detectLang(slotA.file!.name, textA.lines[0] ?? "");
+   295→      if (!lang) lang = detectLang(slotB.file!.name, textB.lines[0] ?? "");
+   296→      if (!lang) lang = autoDetectLang(textA.lines.slice(0, 200).join("\n"), hljs);
+   297→      if (!lang) { if (!cancelled) setSyntax({ lang: "", tokA: null, tokB: null, capped: false }); return; }
+   298→      const charsA = textA.lines.reduce((s, l) => s + l.length + 1, 0);
+   299→      const charsB = textB.lines.reduce((s, l) => s + l.length + 1, 0);
+   300→      const capped = charsA > SYNTAX_CHAR_CAP || charsB > SYNTAX_CHAR_CAP
+   301→        || textA.lines.length > SYNTAX_LINE_CAP || textB.lines.length > SYNTAX_LINE_CAP;
+   302→      if (capped) {
+   303→        if (!cancelled) setSyntax({ lang, tokA: null, tokB: null, capped: true });
+   304→        return;
+   305→      }
+   306→      const tokA = tokenizeLines(textA.lines.join("\n"), lang, hljs);
+   307→      const tokB = tokenizeLines(textB.lines.join("\n"), lang, hljs);
+   308→      if (!cancelled) setSyntax({ lang, tokA, tokB, capped: false });
+   309→    })();
+   310→    return () => { cancelled = true; };
+   311→  }, [dmode, textA, textB, slotA.file, slotB.file]);
+   312→
+   313→  const patch = React.useMemo(() => {
+   314→    if (!textDiff || textDiff.error || !textA || !textB || !slotA.file || !slotB.file) return "";
+   315→    if (textDiff.stats.added === 0 && textDiff.stats.removed === 0) return "";
+   316→    try {
+   317→      return buildUnifiedPatch(slotA.file.name, slotB.file.name, textA.lines, textB.lines, textDiff.ops, textA.noNewline, textB.noNewline);
+   318→    } catch { return ""; }
+   319→  }, [textDiff, textA, textB, slotA.file, slotB.file]);
+   320→
+   321→  /** word-level parts per op index (del → aParts, ins → bParts), for paired change runs */
+   322→  const wordMap = React.useMemo<Map<number, WordDiffResult>>(() => {
+   323→    const m = new Map<number, WordDiffResult>();
+   324→    if (!textDiff || textDiff.error) return m;
+   325→    const ops = textDiff.ops;
+   326→    let i = 0;
+   327→    while (i < ops.length) {
+   328→      if (ops[i].type === "equal") { i++; continue; }
+   329→      const dels: number[] = [];
+   330→      const ins: number[] = [];
+   331→      while (i < ops.length && ops[i].type !== "equal") {
+   332→        if (ops[i].type === "delete") dels.push(i);
+   333→        else ins.push(i);
+   334→        i++;
+   335→      }
+   336→      const pairs = Math.min(dels.length, ins.length);
+   337→      for (let k = 0; k < pairs; k++) {
+   338→        const d = ops[dels[k]] as Extract<LineOp, { type: "delete" }>;
+   339→        const n = ops[ins[k]] as Extract<LineOp, { type: "insert" }>;
+   340→        const r = wordDiff(textA?.lines[d.aIdx] ?? "", textB?.lines[n.bIdx] ?? "");
+   341→        if (r) { m.set(dels[k], r); m.set(ins[k], r); }
+   342→      }
+   343→    }
+   344→    return m;
+   345→  }, [textDiff, textA, textB]);
+   346→
+   347→  /** unified-view segments: change/context runs with collapsible long equal gaps + block ids */
+   348→  const unifiedSegs = React.useMemo<USeg[]>(() => {
+   349→    if (!textDiff || textDiff.error) return [];
+   350→    const ops = textDiff.ops;
+   351→    const segs: USeg[] = [];
+   352→    const itemsOf = (from: number, to: number): USegItem[] => {
+   353→      const out: USegItem[] = [];
+   354→      for (let k = from; k < to; k++) out.push({ op: ops[k], i: k });
+   355→      return out;
+   356→    };
+   357→    let i = 0;
+   358→    let gapId = 0;
+   359→    let blockId = 0;
+   360→    while (i < ops.length) {
+   361→      if (ops[i].type !== "equal") {
+   362→        let j = i;
+   363→        while (j < ops.length && ops[j].type !== "equal") j++;
+   364→        segs.push({ type: "rows", items: itemsOf(i, j), block: blockId++ });
+   365→        i = j;
+   366→        continue;
+   367→      }
+   368→      let j = i;
+   369→      while (j < ops.length && ops[j].type === "equal") j++;
+   370→      const run = j - i;
+   371→      if (run > COLLAPSE_OVER) {
+   372→        segs.push({ type: "rows", items: itemsOf(i, i + CTX) });
+   373→        segs.push({ type: "gap", from: i + CTX, to: j - CTX, count: run - CTX * 2, id: gapId++ });
+   374→        segs.push({ type: "rows", items: itemsOf(j - CTX, j) });
+   375→      } else {
+   376→        segs.push({ type: "rows", items: itemsOf(i, j) });
+   377→      }
+   378→      i = j;
+   379→    }
+   380→    return segs;
+   381→  }, [textDiff]);
+   382→
+   383→  const blockCount = React.useMemo(() => {
+   384→    if (!textDiff || textDiff.error) return 0;
+   385→    let n = 0;
+   386→    for (const s of unifiedSegs) if (s.type === "rows" && s.block != null) n++;
+   387→    return n;
+   388→  }, [textDiff, unifiedSegs]);
+   389→
+   390→  /* jump to a change block: scroll its first row into view (expanding pagination if needed) */
+   391→  const goBlock = React.useCallback((idx: number) => {
+   392→    if (!blockCount) return;
+   393→    const i = (idx + blockCount) % blockCount;
+   394→    setCurBlock(i);
+   395→    const sel = `[data-block="${i}"]`;
+   396→    const scrollTo = () => {
+   397→      const el = document.querySelector(sel);
+   398→      el?.scrollIntoView({ block: "center", behavior: "smooth" });
+   399→    };
+   400→    if (!document.querySelector(sel)) setShownRows((n) => n + ROWS_PER_PAGE);
+   401→    window.requestAnimationFrame(() => window.requestAnimationFrame(scrollTo));
+   402→  }, [blockCount]);
+   403→
+   404→  /* n / p navigate change blocks while in text mode */
+   405→  React.useEffect(() => {
+   406→    if (dmode !== "text") return;
+   407→    const onKey = (e: KeyboardEvent) => {
+   408→      if (e.ctrlKey || e.metaKey || e.altKey) return;
+   409→      const el = e.target as HTMLElement | null;
+   410→      const tag = el?.tagName?.toLowerCase() ?? "";
+   411→      if (tag === "input" || tag === "textarea" || tag === "select" || el?.isContentEditable) return;
+   412→      if (e.key === "n") { e.preventDefault(); goBlock(curBlock + 1); }
+   413→      else if (e.key === "p") { e.preventDefault(); goBlock(curBlock - 1); }
+   414→    };
+   415→    window.addEventListener("keydown", onKey);
+   416→    return () => window.removeEventListener("keydown", onKey);
+   417→  }, [dmode, curBlock, goBlock]);
+   418→
+   419→  const splitRows = React.useMemo<SRow[]>(() => {
+   420→    if (!textDiff || textDiff.error || !textA || !textB) return [];
+   421→    const rows: SRow[] = [];
+   422→    const ops = textDiff.ops;
+   423→    let i = 0;
+   424→    let blockId = 0;
+   425→    while (i < ops.length) {
+   426→      const op = ops[i];
+   427→      if (op.type === "equal") {
+   428→        rows.push({ kind: "eq", aN: op.aIdx, aText: textA.lines[op.aIdx], bN: op.bIdx, bText: textB.lines[op.bIdx] });
+   429→        i++;
+   430→        continue;
+   431→      }
+   432→      const dels: number[] = [];
+   433→      const ins: number[] = [];
+   434→      while (i < ops.length && ops[i].type !== "equal") {
+   435→        if (ops[i].type === "delete") dels.push(i);
+   436→        else ins.push(i);
+   437→        i++;
+   438→      }
+   439→      const pairs = Math.min(dels.length, ins.length);
+   440→      for (let k = 0; k < pairs; k++) {
+   441→        const d = ops[dels[k]] as Extract<LineOp, { type: "delete" }>;
+   442→        const n = ops[ins[k]] as Extract<LineOp, { type: "insert" }>;
+   443→        const w = wordDiff(textA.lines[d.aIdx], textB.lines[n.bIdx]);
+   444→        rows.push({
+   445→          kind: "mod",
+   446→          aN: d.aIdx, aText: textA.lines[d.aIdx],
+   447→          bN: n.bIdx, bText: textB.lines[n.bIdx],
+   448→          aParts: w?.aParts, bParts: w?.bParts,
+   449→          block: blockId,
+   450→        });
+   451→      }
+   452→      for (let k = pairs; k < dels.length; k++) {
+   453→        const d = ops[dels[k]] as Extract<LineOp, { type: "delete" }>;
+   454→        rows.push({ kind: "del", aN: d.aIdx, aText: textA.lines[d.aIdx], block: blockId });
+   455→      }
+   456→      for (let k = pairs; k < ins.length; k++) {
+   457→        const n = ops[ins[k]] as Extract<LineOp, { type: "insert" }>;
+   458→        rows.push({ kind: "ins", bN: n.bIdx, bText: textB.lines[n.bIdx], block: blockId });
+   459→      }
+   460→      blockId++;
+   461→    }
+   462→    return rows;
+   463→  }, [textDiff, textA, textB]);
+   464→
+   465→  /* ---------------- byte-mode helpers (unchanged) ---------------- */
+   466→
+   467→  const identical = !!(slotA.hash && slotB.hash && slotA.hash === slotB.hash && slotA.file?.size === slotB.file?.size);
+   468→  const windowBytes = scan?.windowBytes ?? 0;
+   469→  const diffBytes = scan ? windowBytes - scan.equal : 0;
+   470→  const similarity = scan && windowBytes ? (scan.equal / windowBytes) * 100 : identical ? 100 : 0;
+   471→  const totalPages = Math.max(1, Math.ceil(windowBytes / PAGE));
+   472→  const safePage = Math.min(page, totalPages - 1);
+   473→  const base = safePage * PAGE;
+   474→  const viewLen = Math.max(0, Math.min(PAGE, windowBytes - base));
+   475→  const aBytes = slotA.bytes;
+   476→  const bBytes = slotB.bytes;
+   477→
+   478→  function jumpToOffset(off: number) {
+   479→    const p = Math.floor(off / PAGE);
+   480→    setPage(Math.max(0, Math.min(p, totalPages - 1)));
+   481→  }
+   482→
+   483→  function goHunk(idx: number) {
+   484→    if (!scan || !scan.hunks.length) return;
+   485→    const i = (idx + scan.hunks.length) % scan.hunks.length;
+   486→    setCurHunk(i);
+   487→    jumpToOffset(scan.hunks[i].start);
+   488→  }
+   489→
+   490→  function tryJump() {
+   491→    const q = jump.trim();
+   492→    setJumpErr("");
+   493→    if (!q) return;
+   494→    let v: number;
+   495→    if (/^0x[0-9a-f]+$/i.test(q)) v = parseInt(q, 16);
+   496→    else if (/^\d+$/.test(q)) v = parseInt(q, 10);
+   497→    else { setJumpErr("Use decimal or 0x-hex"); return; }
+   498→    if (v < 0 || v >= windowBytes) { setJumpErr("Out of range"); return; }
+   499→    jumpToOffset(v);
+   500→  }
+   501→
+   502→  function swap() {
+   503→    const a = slotA, b = slotB;
+   504→    setSlotA(b); setSlotB(a);
+   505→    setScan(null);
+   506→  }
+   507→
+   508→  function copySummary() {
+   509→    if (!slotA.file || !slotB.file) return;
+   510→    let resultLine: string;
+   511→    if (dmode === "text" && textDiff) {
+   512→      const s = textDiff.stats;
+   513→      resultLine = s.added === 0 && s.removed === 0
+   514→        ? "result: textually identical"
+   515→        : `result: +${s.added} added · -${s.removed} removed · ~${s.changed} changed · ${s.hunks} hunks · ${s.equal} unchanged lines`;
+   516→    } else {
+   517→      resultLine = identical ? "result: byte-identical"
+   518→        : `result: ${diffBytes} differing bytes · ${similarity.toFixed(2)}% similar · ${scan?.hunks.length ?? 0} hunks · first diff ${scan?.firstDiff != null ? hexOffset(scan.firstDiff) : "—"}`;
+   519→    }
+   520→    const lines = [
+   521→      `A: ${slotA.file.name} (${formatBytes(slotA.file.size)}) sha256=${slotA.hash ?? "…"}`,
+   522→      `B: ${slotB.file.name} (${formatBytes(slotB.file.size)}) sha256=${slotB.hash ?? "…"}`,
+   523→      resultLine,
+   524→    ];
+   525→    void navigator.clipboard?.writeText(lines.join("\n"));
+   526→    setCopied(true);
+   527→    window.setTimeout(() => setCopied(false), 1800);
+   528→  }
+   529→
+   530→  function copyPatch() {
+   531→    if (!patch) return;
+   532→    void navigator.clipboard?.writeText(patch);
+   533→    setPatchCopied(true);
+   534→    window.setTimeout(() => setPatchCopied(false), 1800);
+   535→  }
+   536→
+   537→  function savePatch() {
+   538→    if (!patch || !slotA.file || !slotB.file) return;
+   539→    const base = (slotA.file.name.replace(/\.[^.]+$/, "") || "diff") + "-vs-" + (slotB.file.name.replace(/\.[^.]+$/, "") || "b");
+   540→    const blob = new Blob([patch], { type: "text/x-diff;charset=utf-8" });
+   541→    const url = URL.createObjectURL(blob);
+   542→    const a = document.createElement("a");
+   543→    a.href = url;
+   544→    a.download = `${base}.patch`;
+   545→    document.body.appendChild(a);
+   546→    a.click();
+   547→    a.remove();
+   548→    window.setTimeout(() => URL.revokeObjectURL(url), 4000);
+   549→  }
+   550→
+   551→  const slotCard = (side: "A" | "B", slot: SlotState, onFile: (f: File | null) => void, inputRef: React.RefObject<HTMLInputElement | null>) => (
+   552→    <div
+   553→      onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+   554→      onDrop={(e) => {
+   555→        e.preventDefault(); e.stopPropagation();
+   556→        const f = e.dataTransfer?.files?.[0];
+   557→        if (f) { setScan(null); onFile(f); }
+   558→      }}
+   559→      className="group/slot flex min-w-0 flex-1 cursor-pointer items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-900/60 px-4 py-3 transition-colors hover:border-emerald-800/70 hover:bg-zinc-900"
+   560→      onClick={() => inputRef.current?.click()}
+   561→      role="button"
+   562→      aria-label={`Choose file for side ${side}`}
+   563→      tabIndex={0}
+   564→      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); inputRef.current?.click(); } }}
+   565→    >
+   566→      <span className={cn(
+   567→        "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border font-mono text-sm font-bold",
+   568→        side === "A"
+   569→          ? "border-teal-900/60 bg-teal-950/40 text-teal-300"
+   570→          : "border-amber-900/60 bg-amber-950/30 text-amber-300",
+   571→      )}>{side}</span>
+   572→      <div className="min-w-0 flex-1">
+   573→        {slot.file ? (
+   574→          <>
+   575→            <div className="truncate font-mono text-xs text-zinc-200" title={slot.file.name}>{slot.file.name}</div>
+   576→            <div className="mt-0.5 flex items-center gap-2 font-mono text-[10px] text-zinc-500">
+   577→              <span className="shrink-0">{formatBytes(slot.file.size)}</span>
+   578→              {slot.truncated ? <span className="inline-flex shrink-0 items-center gap-1 text-amber-400/90"><AlertTriangle className="h-3 w-3" />window {formatBytes(COMPARE_CAP)}</span> : null}
+   579→              {slot.hash ? (
+   580→                <span
+   581→                  className="inline-flex min-w-0 items-center gap-1 rounded border border-zinc-800 bg-zinc-950/60 px-1.5 py-px"
+   582→                  title={`sha256 ${slot.hash} — click to copy`}
+   583→                  onClick={(e) => { e.stopPropagation(); void navigator.clipboard?.writeText(slot.hash ?? ""); }}
+   584→                  role="button"
+   585→                  tabIndex={0}
+   586→                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); void navigator.clipboard?.writeText(slot.hash ?? ""); } }}
+   587→                >
+   588→                  <span className="shrink-0 text-zinc-600">sha256</span>
+   589→                  <span className="truncate text-zinc-400">{slot.hash.slice(0, 8)}…{slot.hash.slice(-4)}</span>
+   590→                </span>
+   591→              ) : null}
+   592→            </div>
+   593→          </>
+   594→        ) : (
+   595→          <div className="text-xs text-zinc-500">
+   596→            <span className="text-zinc-300">Click or drop file</span> — side {side}
+   597→          </div>
+   598→        )}
+   599→      </div>
+   600→      <input
+   601→        ref={inputRef}
+   602→        type="file"
+   603→        className="hidden"
+   604→        onChange={(e) => {
+   605→          const f = e.target.files?.[0] ?? null;
+   606→          if (f) { setScan(null); onFile(f); }
+   607→          e.target.value = "";
+   608→        }}
+   609→      />
+   610→    </div>
+   611→  );
+   612→
+   613→  /* ---------------- text render helpers ---------------- */
+   614→
+   615→  /** single syntax token as a span (class targets the scoped .dxhl palette) */
+   616→  const tokSpan = (t: LineTok, key: string): React.ReactNode =>
+   617→    t.cls ? <span key={key} className={t.cls}>{t.text}</span> : <React.Fragment key={key}>{t.text}</React.Fragment>;
+   618→
+   619→  /**
+   620→   * Full line renderer: syntax tokens (when on) merged with word-level changed
+   621→   * spans — changed words keep their rose/emerald bg while inheriting token colors,
+   622→   * so GitHub-style word diffs read like syntax-highlighted code.
+   623→   */
+   624→  const renderLineContent = (
+   625→    text: string,
+   626→    toks: LineTok[] | undefined,
+   627→    parts: WordPartView[] | undefined,
+   628→    side: "del" | "ins" | "ctx",
+   629→  ): React.ReactNode => {
+   630→    const useToks = !!(syntaxOn && syntax && toks && toks.length);
+   631→    const useParts = !!(wordHl && parts && parts.length);
+   632→    if (useParts) {
+   633→      const out: React.ReactNode[] = [];
+   634→      let off = 0;
+   635→      for (let pi = 0; pi < parts.length; pi++) {
+   636→        const p = parts[pi];
+   637→        const start = off;
+   638→        const end = off + p.text.length;
+   639→        off = end;
+   640→        const inner = useToks ? sliceTokens(toks!, start, end) : [{ text: p.text, cls: null }];
+   641→        const rendered = inner.map((t, ti) => tokSpan(t, `${pi}-${ti}`));
+   642→        if (p.changed) {
+   643→          out.push(
+   644→            <span
+   645→              key={pi}
+   646→              className={cn(
+   647→                "rounded-[2px]",
+   648→                side === "del" ? "bg-rose-800/80 text-rose-100" : "bg-emerald-800/80 text-emerald-100",
+   649→              )}
+   650→            >{rendered}</span>,
+   651→          );
+   652→        } else {
+   653→          out.push(<React.Fragment key={pi}>{rendered}</React.Fragment>);
+   654→        }
+   655→      }
+   656→      return out;
+   657→    }
+   658→    if (useToks) return toks!.map((t, i) => tokSpan(t, String(i)));
+   659→    return text || " ";
+   660→  };
+   661→
+   662→  const renderUnifiedRows = (): React.ReactNode[] => {
+   663→    const out: React.ReactNode[] = [];
+   664→    let shown = 0;
+   665→    const keyBase = "u";
+   666→    const tokA = syntax?.tokA ?? null;
+   667→    const tokB = syntax?.tokB ?? null;
+   668→    for (let si = 0; si < unifiedSegs.length; si++) {
+   669→      if (shown >= shownRows) break;
+   670→      const seg = unifiedSegs[si];
+   671→      if (seg.type === "gap") {
+   672→        if (expandedGaps.has(seg.id)) {
+   673→          const ops = textDiff?.ops.slice(seg.from, seg.to) ?? [];
+   674→          for (let k = 0; k < ops.length; k++) {
+   675→            if (shown++ >= shownRows) break;
+   676→            const op = ops[k];
+   677→            if (op.type === "equal") out.push(unifiedRow(keyBase + si + "e" + op.aIdx, "ctx", op.aIdx, op.bIdx, textA?.lines[op.aIdx] ?? "", undefined, undefined, undefined, tokA?.[op.aIdx]));
+   678→          }
+   679→        } else {
+   680→          out.push(
+   681→            <button
+   682→              key={keyBase + "g" + seg.id}
+   683→              type="button"
+   684→              onClick={() => setExpandedGaps((prev) => { const n = new Set(prev); n.add(seg.id); return n; })}
+   685→              className="group/gap flex w-full items-center gap-3 border-y border-zinc-800/60 bg-zinc-900/40 px-3 py-1 font-mono text-[10px] text-zinc-500 transition-colors hover:bg-zinc-900 hover:text-emerald-300"
+   686→            >
+   687→              <ChevronRight className="h-3 w-3 transition-transform group-hover/gap:rotate-90" />
+   688→              ⋯ {seg.count.toLocaleString()} unchanged lines — expand
+   689→            </button>,
+   690→          );
+   691→        }
+   692→        continue;
+   693→      }
+   694→      for (const it of seg.items) {
+   695→        if (shown >= shownRows) break;
+   696→        const op = it.op;
+   697→        const w = wordMap.get(it.i);
+   698→        if (op.type === "equal") out.push(unifiedRow(keyBase + si + "e" + op.aIdx, "ctx", op.aIdx, op.bIdx, textA?.lines[op.aIdx] ?? "", undefined, undefined, undefined, tokA?.[op.aIdx]));
+   699→        else if (op.type === "delete") out.push(unifiedRow(keyBase + si + "d" + op.aIdx, "del", op.aIdx, null, textA?.lines[op.aIdx] ?? "", w?.aParts, "del", seg.block, tokA?.[op.aIdx]));
+   700→        else out.push(unifiedRow(keyBase + si + "i" + op.bIdx, "ins", null, op.bIdx, textB?.lines[op.bIdx] ?? "", w?.bParts, "ins", seg.block, tokB?.[op.bIdx]));
+   701→        shown++;
+   702→      }
+   703→    }
+   704→    return out;
+   705→  };
+   706→
+   707→  const unifiedRow = (
+   708→    key: string,
+   709→    kind: "ctx" | "del" | "ins",
+   710→    aN: number | null,
+   711→    bN: number | null,
+   712→    text: string,
+   713→    parts?: WordPartView[],
+   714→    partsSide?: "del" | "ins",
+   715→    block?: number,
+   716→    toks?: LineTok[],
+   717→  ): React.ReactNode => (
+   718→    <div
+   719→      key={key}
+   720→      data-block={block}
+   721→      className={cn(
+   722→        "group/urow flex items-start gap-0 font-mono text-[11px] leading-5",
+   723→        kind === "del" && "bg-rose-950/30",
+   724→        kind === "ins" && "bg-emerald-950/30",
+   725→        block != null && block === curBlock && "relative shadow-[inset_2px_0_0_0_#f59e0b]",
+   726→      )}
+   727→    >
+   728→      <span className={cn(
+   729→        "w-12 shrink-0 select-none border-r pr-2 text-right text-[10px] tabular-nums",
+   730→        block != null && block === curBlock ? "border-amber-700/60 text-amber-400" : "border-zinc-800/60 text-zinc-600",
+   731→      )}>{aN != null ? aN + 1 : ""}</span>
+   732→      <span className={cn(
+   733→        "w-12 shrink-0 select-none border-r px-2 text-right text-[10px] tabular-nums",
+   734→        block != null && block === curBlock ? "border-amber-700/60 text-amber-400" : "border-zinc-800/60 text-zinc-600",
+   735→      )}>{bN != null ? bN + 1 : ""}</span>
+   736→      <span className={cn(
+   737→        "w-5 shrink-0 select-none text-center",
+   738→        kind === "del" ? "text-rose-400" : kind === "ins" ? "text-emerald-400" : "text-zinc-700",
+   739→      )}>
+   740→        {kind === "del" ? "−" : kind === "ins" ? "+" : " "}
+   741→      </span>
+   742→      <span className={cn(
+   743→        "min-w-0 flex-1 px-2 text-zinc-300",
+   744→        kind === "del" && "text-rose-200",
+   745→        kind === "ins" && "text-emerald-200",
+   746→        wrap ? "whitespace-pre-wrap break-all" : "whitespace-pre",
+   747→      )}>
+   748→        {renderLineContent(text || " ", toks, parts, (partsSide ?? (kind === "ctx" ? "ctx" : kind)) as "del" | "ins" | "ctx")}
+   749→      </span>
+   750→    </div>
+   751→  );
+   752→
+   753→  const totalUnifiedRows = React.useMemo(() => {
+   754→    let n = 0;
+   755→    for (const seg of unifiedSegs) {
+   756→      if (seg.type === "gap") { if (expandedGaps.has(seg.id)) n += seg.count; else n += 1; }
+   757→      else n += seg.items.length;
+   758→    }
+   759→    return n;
+   760→  }, [unifiedSegs, expandedGaps]);
+   761→
+   762→  const totalSplitRows = splitRows.length;
+   763→
+   764→  /* ---------------- render ---------------- */
+   765→
+   766→  const bothReady = !!(slotA.bytes && slotB.bytes && !busy);
+   767→  const textTruncated = !!(textA?.truncatedBytes || textA?.truncatedLines || textB?.truncatedBytes || textB?.truncatedLines);
+   768→
+   769→  return (
+   770→    <div className="flex h-full min-h-0 flex-col bg-zinc-950">
+   771→      <ViewerToolbar
+   772→        left={
+   773→          <>
+   774→            <Chip tone="emerald">Compare</Chip>
+   775→            <Segmented
+   776→              value={dmode}
+   777→              onChange={(v) => { modeTouched.current = true; setDmode(v); }}
+   778→              options={[{ value: "bytes", label: "Bytes" }, { value: "text", label: "Text" }]}
+   779→            />
+   780→            <ToolButton label="Swap A and B" onClick={swap}><ArrowLeftRight className="h-3.5 w-3.5" /></ToolButton>
+   781→            <ToolbarDivider />
+   782→            <ToolButton label="Copy summary" onClick={copySummary}>
+   783→              {copied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+   784→            </ToolButton>
+   785→            {dmode === "text" && patch ? (
+   786→              <>
+   787→                <ToolButton label="Copy patch" onClick={copyPatch} title="Copy unified diff to clipboard">
+   788→                  {patchCopied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+   789→                </ToolButton>
+   790→                <ToolButton label="Save .patch" onClick={savePatch} title="Download unified diff">
+   791→                  <Download className="h-3.5 w-3.5" />
+   792→                </ToolButton>
+   793→              </>
+   794→            ) : null}
+   795→          </>
+   796→        }
+   797→        center={dmode === "text" ? (
+   798→          <>
+   799→            <Segmented
+   800→              value={textView}
+   801→              onChange={(v) => setTextView(v)}
+   802→              options={[{ value: "unified", label: "Unified" }, { value: "split", label: "Split" }]}
+   803→            />
+   804→            <ToolButton
+   805→              label="Syntax"
+   806→              active={syntaxOn}
+   807→              onClick={() => setSyntaxOn((v) => !v)}
+   808→              title={syntax?.lang ? `Syntax highlighting (${syntax.lang})` : "Syntax highlighting (no language detected)"}
+   809→            >
+   810→              <Code2 className={cn("h-3.5 w-3.5", !syntax?.lang && "opacity-40")} />
+   811→            </ToolButton>
+   812→            <ToolButton label="Words" active={wordHl} onClick={() => setWordHl((v) => !v)} title="Word-level highlighting inside changed lines">
+   813→              <Highlighter className="h-3.5 w-3.5" />
+   814→            </ToolButton>
+   815→            <ToolButton label="Wrap" active={wrap} onClick={() => setWrap((v) => !v)} title="Toggle line wrapping">
+   816→              <WrapText className="h-3.5 w-3.5" />
+   817→            </ToolButton>
+   818→          </>
+   819→        ) : undefined}
+   820→        right={
+   821→          <ToolButton label="Close compare" onClick={onClose}><X className="h-3.5 w-3.5" /></ToolButton>
+   822→        }
+   823→      />
+   824→
+   825→      {/* slots */}
+   826→      <div className="flex shrink-0 items-start gap-2 border-b border-zinc-800/80 bg-zinc-950 p-3">
+   827→        {slotCard("A", slotA, (f) => setSlotA((s) => ({ ...emptySlot, file: f })), inputA)}
+   828→        <div className="flex shrink-0 flex-col items-center gap-1 pt-4 text-zinc-600">
+   829→          <GitCompare className="h-4 w-4" />
+   830→        </div>
+   831→        {slotCard("B", slotB, (f) => setSlotB((s) => ({ ...emptySlot, file: f })), inputB)}
+   832→      </div>
+   833→
+   834→      {/* verdict + stats */}
+   835→      {(slotA.file || slotB.file) ? (
+   836→        <div className="shrink-0 border-b border-zinc-800/80 bg-zinc-900/30 px-3 py-2">
+   837→          {busy ? (
+   838→            <div className="flex items-center gap-2 text-xs text-zinc-400">
+   839→              <Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-400" />
+   840→              Reading &amp; hashing…
+   841→            </div>
+   842→          ) : hashErr ? (
+   843→            <ErrorCard title="Hash error" message={hashErr} />
+   844→          ) : identical ? (
+   845→            <div className="flex items-center gap-2 rounded-lg border border-emerald-900/60 bg-emerald-950/40 px-3 py-2 text-sm text-emerald-300">
+   846→              <Equal className="h-4 w-4" />
+   847→              Files are byte-identical
+   848→              <span className="ml-auto font-mono text-[10px] text-emerald-400/70">sha256 match</span>
+   849→            </div>
+   850→          ) : dmode === "text" && textDiff ? (
+   851→            <div className="flex flex-wrap items-center gap-1.5 font-mono text-[10px]">
+   852→              {textDiff.stats.added === 0 && textDiff.stats.removed === 0 ? (
+   853→                <span className="rounded-full border border-emerald-900/60 bg-emerald-950/40 px-2 py-0.5 text-emerald-300">textually identical (bytes may differ)</span>
+   854→              ) : (
+   855→                <>
+   856→                  <span className="inline-flex items-center gap-1 rounded-full border border-emerald-900/60 bg-emerald-950/40 px-2 py-0.5 text-emerald-300 tabular-nums"><Plus className="h-3 w-3" />{textDiff.stats.added.toLocaleString()} added</span>
+   857→                  <span className="inline-flex items-center gap-1 rounded-full border border-rose-900/60 bg-rose-950/40 px-2 py-0.5 text-rose-300 tabular-nums"><Minus className="h-3 w-3" />{textDiff.stats.removed.toLocaleString()} removed</span>
+   858→                  <span className="rounded-full border border-amber-900/60 bg-amber-950/30 px-2 py-0.5 text-amber-300 tabular-nums">~{textDiff.stats.changed.toLocaleString()} changed</span>
+   859→                  <span className="rounded-full border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-zinc-300 tabular-nums">{textDiff.stats.hunks.toLocaleString()} hunks</span>
+   860→                  <span className="rounded-full border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-zinc-300 tabular-nums">{textDiff.stats.equal.toLocaleString()} unchanged</span>
+   861→                </>
+   862→              )}
+   863→              {textA && textB && textA.enc !== textB.enc ? (
+   864→                <span className="rounded-full border border-amber-900/60 bg-amber-950/30 px-2 py-0.5 text-amber-300">A {textA.enc} vs B {textB.enc}</span>
+   865→              ) : null}
+   866→              {textTruncated ? (
+   867→                <span className="inline-flex items-center gap-1 rounded-full border border-amber-900/60 bg-amber-950/30 px-2 py-0.5 text-amber-300">
+   868→                  <AlertTriangle className="h-3 w-3" />text window: first {formatBytes(TEXT_CAP)} / {LINE_CAP.toLocaleString()} lines per side
+   869→                </span>
+   870→              ) : null}
+   871→              {syntaxOn && syntax?.capped ? (
+   872→                <span className="inline-flex items-center gap-1 rounded-full border border-amber-900/60 bg-amber-950/30 px-2 py-0.5 text-amber-300">
+   873→                  <AlertTriangle className="h-3 w-3" />syntax off — file over {SYNTAX_LINE_CAP.toLocaleString()} lines
+   874→                </span>
+   875→              ) : null}
+   876→            </div>
+   877→          ) : scan ? (
+   878→            <div className="flex flex-wrap items-center gap-1.5 font-mono text-[10px]">
+   879→              <span className="rounded-full border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-zinc-300 tabular-nums">diff {diffBytes.toLocaleString()} B</span>
+   880→              <span className="rounded-full border border-rose-900/60 bg-rose-950/40 px-2 py-0.5 text-rose-300 tabular-nums">{similarity.toFixed(2)}% similar</span>
+   881→              <span className="rounded-full border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-zinc-300 tabular-nums">{scan.hunks.length} hunks</span>
+   882→              {scan.firstDiff != null ? (
+   883→                <span className="rounded-full border border-rose-900/60 bg-rose-950/30 px-2 py-0.5 text-rose-200 tabular-nums">first {hexOffset(scan.firstDiff)}</span>
+   884→              ) : null}
+   885→              {(slotA.truncated || slotB.truncated) ? (
+   886→                <span className="inline-flex items-center gap-1 rounded-full border border-amber-900/60 bg-amber-950/30 px-2 py-0.5 text-amber-300">
+   887→                  <AlertTriangle className="h-3 w-3" />compared first {formatBytes(COMPARE_CAP)}
+   888→                </span>
+   889→              ) : null}
+   890→            </div>
+   891→          ) : (
+   892→            <div className="flex items-center gap-2 text-xs text-zinc-500">
+   893→              <FileDiff className="h-3.5 w-3.5" />
+   894→              {slotA.file && slotB.file ? "Pick both sides to compare" : "Drop a file into each slot"}
+   895→            </div>
+   896→          )}
+   897→        </div>
+   898→      ) : null}
+   899→
+   900→      {/* text change-block navigator */}
+   901→      {dmode === "text" && blockCount > 0 && textDiff && !textDiff.error && textDiff.stats.added + textDiff.stats.removed > 0 ? (
+   902→        <div className="flex shrink-0 items-center gap-2 border-b border-zinc-800/80 bg-zinc-950 px-3 py-1.5">
+   903→          <ToolButton label="Previous change" onClick={() => goBlock(curBlock - 1)} title="Previous change block (p)"><ChevronLeft className="h-3.5 w-3.5" /></ToolButton>
+   904→          <span className="shrink-0 font-mono text-[10px] text-zinc-500 tabular-nums">
+   905→            change {blockCount ? `${Math.min(curBlock, blockCount - 1) + 1} / ${blockCount}` : "0 / 0"}
+   906→          </span>
+   907→          <ToolButton label="Next change" onClick={() => goBlock(curBlock + 1)} title="Next change block (n)"><ChevronRight className="h-3.5 w-3.5" /></ToolButton>
+   908→          <span className="hidden shrink-0 items-center gap-1.5 rounded-full border border-zinc-800 bg-zinc-900/60 px-2 py-0.5 font-mono text-[9px] text-zinc-500 sm:inline-flex">
+   909→            <kbd className="rounded border border-zinc-700 bg-zinc-900 px-1">n</kbd>/<kbd className="rounded border border-zinc-700 bg-zinc-900 px-1">p</kbd>
+   910→            to navigate
+   911→          </span>
+   912→        </div>
+   913→      ) : null}
+   914→
+   915→      {/* byte hunk navigator */}
+   916→      {dmode === "bytes" && scan && scan.hunks.length > 0 && !identical ? (
+   917→        <div className="flex shrink-0 items-center gap-2 border-b border-zinc-800/80 bg-zinc-950 px-3 py-1.5">
+   918→          <ToolButton label="Previous difference" onClick={() => goHunk(curHunk - 1)}><ChevronLeft className="h-3.5 w-3.5" /></ToolButton>
+   919→          <span className="shrink-0 font-mono text-[10px] text-zinc-500 tabular-nums">
+   920→            {scan.hunks.length ? `${curHunk + 1} / ${scan.hunks.length}` : "0 / 0"}
+   921→          </span>
+   922→          <ToolButton label="Next difference" onClick={() => goHunk(curHunk + 1)}><ChevronRight className="h-3.5 w-3.5" /></ToolButton>
+   923→          <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto scrollbar-thin py-0.5">
+   924→            {scan.hunks.slice(0, 400).map((h, i) => (
+   925→              <button
+   926→                key={i}
+   927→                type="button"
+   928→                onClick={() => { setCurHunk(i); jumpToOffset(h.start); }}
+   929→                title={`${hexOffset(h.start)} · ${h.end - h.start} B${h.tail ? " · tail" : ""}`}
+   930→                className={cn(
+   931→                  "shrink-0 rounded-full border px-2 py-0.5 font-mono text-[9px] tabular-nums transition-colors",
+   932→                  i === curHunk
+   933→                    ? "border-rose-700 bg-rose-900/40 text-rose-200"
+   934→                    : h.tail
+   935→                      ? "border-amber-900/60 bg-amber-950/30 text-amber-300/80 hover:border-amber-700"
+   936→                      : "border-rose-900/50 bg-rose-950/20 text-rose-300/70 hover:border-rose-700",
+   937→                )}
+   938→              >
+   939→                {h.tail ? "+" : ""}{h.start.toString(16).toUpperCase()}
+   940→              </button>
+   941→            ))}
+   942→            {scan.hunks.length > 400 ? <span className="shrink-0 self-center font-mono text-[9px] text-zinc-600">+{(scan.hunks.length - 400).toLocaleString()} more</span> : null}
+   943→          </div>
+   944→        </div>
+   945→      ) : null}
+   946→
+   947→      {/* main pane */}
+   948→      {dmode === "text" ? (
+   949→        <div className="relative min-h-0 flex-1 overflow-auto bg-zinc-950 scrollbar-thin">
+   950→          {!bothReady || !textA || !textB ? (
+   951→            slotA.file || slotB.file ? (
+   952→              <LoadingState label="Reading files…" />
+   953→            ) : (
+   954→              <div className="flex h-full items-center justify-center text-center">
+   955→                <div className="max-w-sm">
+   956→                  <FileDiff className="mx-auto mb-3 h-10 w-10 text-zinc-700" />
+   957→                  <div className="text-sm font-medium text-zinc-300">Text compare</div>
+   958→                  <p className="mt-1 text-xs leading-relaxed text-zinc-500">
+   959→                    Load two text files — Omniscope aligns them line-by-line (patience + LCS diff),
+   960→                    fully client-side. Export a standard .patch when done.
+   961→                  </p>
+   962→                </div>
+   963→              </div>
+   964→            )
+   965→          ) : textDiff?.error ? (
+   966→            <div className="p-4"><ErrorCard title="Diff failed" message={textDiff.error} hint="Try Bytes mode for binary files." /></div>
+   967→          ) : textDiff && textDiff.stats.added === 0 && textDiff.stats.removed === 0 ? (
+   968→            <div className="flex h-full items-center justify-center">
+   969→              <div className="flex items-center gap-2 rounded-lg border border-emerald-900/60 bg-emerald-950/40 px-4 py-3 text-sm text-emerald-300">
+   970→                <Equal className="h-4 w-4" />
+   971→                Textually identical — {textDiff.stats.equal.toLocaleString()} matching lines
+   972→              </div>
+   973→            </div>
+   974→          ) : textView === "unified" ? (
+   975→            <div className="min-w-0 dxhl">
+   976→              <style>{HL_PALETTE_CSS}</style>
+   977→              <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-zinc-800/80 bg-zinc-950/95 px-3 py-1 backdrop-blur">
+   978→                <Rows3 className="h-3 w-3 text-zinc-600" />
+   979→                <span className="font-mono text-[9px] uppercase tracking-wider text-zinc-600">unified · 3-line context · collapsible gaps{syntaxOn && syntax?.lang ? ` · ${syntax.lang}` : ""}</span>
+   980→              </div>
+   981→              {renderUnifiedRows()}
+   982→              {totalUnifiedRows <= shownRows && textA && textB ? (
+   983→                <div className="mt-1 flex items-center justify-center gap-2 border-t border-zinc-800/60 py-2 font-mono text-[10px] text-zinc-700">
+   984→                  <span className="h-px w-16 bg-zinc-800" aria-hidden />
+   985→                  EOF — A {textA.lines.length.toLocaleString()} · B {textB.lines.length.toLocaleString()} lines
+   986→                  <span className="h-px w-16 bg-zinc-800" aria-hidden />
+   987→                </div>
+   988→              ) : null}
+   989→              {totalUnifiedRows > shownRows ? (
+   990→                <button
+   991→                  type="button"
+   992→                  onClick={() => setShownRows((n) => n + ROWS_PER_PAGE)}
+   993→                  className="my-2 mx-auto flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-2 font-mono text-[11px] text-zinc-300 transition-colors hover:border-emerald-700 hover:text-emerald-300"
+   994→                >
+   995→                  <ChevronRight className="h-3.5 w-3.5 rotate-90" />
+   996→                  Show more rows ({(totalUnifiedRows - shownRows).toLocaleString()} hidden)
+   997→                </button>
+   998→              ) : null}
+   999→            </div>
+  1000→          ) : (
+  1001→            <div className="min-w-0 dxhl">
+  1002→              <style>{HL_PALETTE_CSS}</style>
+  1003→              <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-zinc-800/80 bg-zinc-950/95 px-3 py-1 backdrop-blur">
+  1004→                <Columns2 className="h-3 w-3 text-zinc-600" />
+  1005→                <span className="font-mono text-[9px] uppercase tracking-wider text-zinc-600">split · aligned sides · paired changes{syntaxOn && syntax?.lang ? ` · ${syntax.lang}` : ""}</span>
+  1006→              </div>
+  1007→              {splitRows.slice(0, shownRows).map((r, i) => {
+  1008→                const aToks = syntax?.tokA?.[r.aN ?? -1];
+  1009→                const bToks = syntax?.tokB?.[r.bN ?? -1];
+  1010→                return (
+  1011→                <div
+  1012→                  key={i}
+  1013→                  data-block={r.block}
+  1014→                  className={cn(
+  1015→                    "flex items-start font-mono text-[11px] leading-5",
+  1016→                    r.block != null && r.block === curBlock && "relative shadow-[inset_2px_0_0_0_#f59e0b]",
+  1017→                  )}
+  1018→                >
+  1019→                  <div className={cn(
+  1020→                    "flex min-w-0 flex-1 items-start",
+  1021→                    (r.kind === "del" || r.kind === "mod") && "bg-rose-950/30",
+  1022→                    r.kind === "eq" && "hover:bg-zinc-900/50",
+  1023→                  )}>
+  1024→                    <span className={cn(
+  1025→                      "w-12 shrink-0 select-none border-r pr-2 text-right text-[10px] tabular-nums",
+  1026→                      r.block != null && r.block === curBlock ? "border-amber-700/60 text-amber-400" : "border-zinc-800/60 text-zinc-600",
+  1027→                    )}>{r.aN != null ? r.aN + 1 : ""}</span>
+  1028→                    <span className={cn(
+  1029→                      "min-w-0 flex-1 px-2",
+  1030→                      r.kind === "del" ? "text-rose-200" : r.kind === "mod" ? "text-rose-200" : "text-zinc-300",
+  1031→                      wrap ? "whitespace-pre-wrap break-all" : "whitespace-pre",
+  1032→                    )}>
+  1033→                      {renderLineContent(r.aText || " ", aToks, r.aParts, "del")}
+  1034→                    </span>
+  1035→                  </div>
+  1036→                  <div className={cn(
+  1037→                    "flex min-w-0 flex-1 items-start border-l border-zinc-800",
+  1038→                    (r.kind === "ins" || r.kind === "mod") && "bg-emerald-950/30",
+  1039→                    r.kind === "eq" && "hover:bg-zinc-900/50",
+  1040→                  )}>
+  1041→                    <span className={cn(
+  1042→                      "w-12 shrink-0 select-none border-r pr-2 text-right text-[10px] tabular-nums",
+  1043→                      r.block != null && r.block === curBlock ? "border-amber-700/60 text-amber-400" : "border-zinc-800/60 text-zinc-600",
+  1044→                    )}>{r.bN != null ? r.bN + 1 : ""}</span>
+  1045→                    <span className={cn(
+  1046→                      "min-w-0 flex-1 px-2",
+  1047→                      r.kind === "ins" ? "text-emerald-200" : r.kind === "mod" ? "text-emerald-200" : "text-zinc-300",
+  1048→                      wrap ? "whitespace-pre-wrap break-all" : "whitespace-pre",
+  1049→                    )}>
+  1050→                      {renderLineContent(r.bText || " ", bToks, r.bParts, "ins")}
+  1051→                    </span>
+  1052→                  </div>
+  1053→                </div>
+  1054→                );
+  1055→              })}
+  1056→              {totalSplitRows <= shownRows && textA && textB ? (
+  1057→                <div className="flex items-stretch border-t border-zinc-800/60 font-mono text-[10px]">
+  1058→                  <div className="flex min-w-0 flex-1 items-center justify-center gap-2 py-2 text-zinc-700">
+  1059→                    <span className="h-px flex-1 max-w-16 bg-zinc-800" aria-hidden />
+  1060→                    EOF · {textA.lines.length.toLocaleString()} lines
+  1061→                    <span className="h-px flex-1 max-w-16 bg-zinc-800" aria-hidden />
+  1062→                  </div>
+  1063→                  <div className="flex min-w-0 flex-1 items-center justify-center gap-2 border-l border-zinc-800 py-2 text-zinc-700">
+  1064→                    <span className="h-px flex-1 max-w-16 bg-zinc-800" aria-hidden />
+  1065→                    EOF · {textB.lines.length.toLocaleString()} lines
+  1066→                    <span className="h-px flex-1 max-w-16 bg-zinc-800" aria-hidden />
+  1067→                  </div>
+  1068→                </div>
+  1069→              ) : null}
+  1070→              {totalSplitRows > shownRows ? (
+  1071→                <button
+  1072→                  type="button"
+  1073→                  onClick={() => setShownRows((n) => n + ROWS_PER_PAGE)}
+  1074→                  className="my-2 mx-auto flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-2 font-mono text-[11px] text-zinc-300 transition-colors hover:border-emerald-700 hover:text-emerald-300"
+  1075→                >
+  1076→                  <ChevronRight className="h-3.5 w-3.5 rotate-90" />
+  1077→                  Show more rows ({(totalSplitRows - shownRows).toLocaleString()} hidden)
+  1078→                </button>
+  1079→              ) : null}
+  1080→            </div>
+  1081→          )}
+  1082→        </div>
+  1083→      ) : (
+  1084→        /* hex table */
+  1085→        <div className="relative min-h-0 flex-1 overflow-auto bg-zinc-950 p-3 scrollbar-thin">
+  1086→          {busy || (!aBytes && !bBytes) ? (
+  1087→            slotA.file || slotB.file ? (
+  1088→              <LoadingState label="Reading files…" />
+  1089→            ) : (
+  1090→              <div className="flex h-full items-center justify-center text-center">
+  1091→                <div className="max-w-sm">
+  1092→                  <GitCompare className="mx-auto mb-3 h-10 w-10 text-zinc-700" />
+  1093→                  <div className="text-sm font-medium text-zinc-300">Binary compare</div>
+  1094→                  <p className="mt-1 text-xs leading-relaxed text-zinc-500">
+  1095→                    Load two files — Omniscope hashes and diffs them byte-by-byte, fully client-side.
+  1096→                    Differing bytes are highlighted, with hunk navigation and jump-to-offset.
+  1097→                    Text files auto-switch to the <span className="text-emerald-300">Text</span> mode.
+  1098→                  </p>
+  1099→                </div>
+  1100→              </div>
+  1101→            )
+  1102→          ) : aBytes && bBytes ? (
+  1103→            <table className="w-full border-separate border-spacing-0 font-mono text-[11px] leading-5">
+  1104→              <thead className="sticky top-0 z-10 bg-zinc-950/95 backdrop-blur">
+  1105→                <tr className="text-[9px] uppercase tracking-wider text-zinc-600">
+  1106→                  <th className="border-b border-zinc-800 px-2 py-1 text-left font-medium">Offset</th>
+  1107→                  <th className="border-b border-zinc-800 px-2 py-1 text-left font-medium text-teal-400/70">A hex</th>
+  1108→                  <th className="border-b border-zinc-800 px-2 py-1 text-left font-medium text-amber-400/70">B hex</th>
+  1109→                  <th className="border-b border-zinc-800 px-2 py-1 text-left font-medium text-teal-400/50">A ascii</th>
+  1110→                  <th className="border-b border-zinc-800 px-2 py-1 text-left font-medium text-amber-400/50">B ascii</th>
+  1111→                </tr>
+  1112→              </thead>
+  1113→              <tbody>
+  1114→                {Array.from({ length: Math.ceil(viewLen / ROW) }, (_, r) => {
+  1115→                  const rowOff = base + r * ROW;
+  1116→                  const cells = Array.from({ length: ROW }, (_, c) => {
+  1117→                    const off = rowOff + c;
+  1118→                    const av = off < aBytes.length ? aBytes[off] : null;
+  1119→                    const bv = off < bBytes.length ? bBytes[off] : null;
+  1120→                    const pastA = off >= aBytes.length;
+  1121→                    const pastB = off >= bBytes.length;
+  1122→                    const diff = av !== bv;
+  1123→                    return { off, av, bv, pastA, pastB, diff };
+  1124→                  });
+  1125→                  return (
+  1126→                    <tr key={r} className="group/row">
+  1127→                      <td className="whitespace-nowrap border-b border-zinc-900 px-2 py-0.5 text-zinc-600 tabular-nums">{rowOff.toString(16).padStart(8, "0")}</td>
+  1128→                      {(["a", "b"] as const).map((side) => (
+  1129→                        <td key={side} className="whitespace-nowrap border-b border-zinc-900 px-2 py-0.5">
+  1130→                          {cells.map((c) => {
+  1131→                            const v = side === "a" ? c.av : c.bv;
+  1132→                            const past = side === "a" ? c.pastA : c.pastB;
+  1133→                            return (
+  1134→                              <span
+  1135→                                key={side + c.off}
+  1136→                                title={c.diff && !past ? `${hexOffset(c.off)}: ${toHexByte(side === "a" ? (c.av ?? 0) : (c.bv ?? 0))} → ${toHexByte(side === "a" ? (c.bv ?? 0) : (c.av ?? 0))}` : undefined}
+  1137→                                className={cn(
+  1138→                                  "inline-block w-[2ch] rounded text-center",
+  1139→                                  past
+  1140→                                    ? "bg-amber-950/40 text-amber-500/40"
+  1141→                                    : c.diff
+  1142→                                      ? "bg-rose-950/60 text-rose-300"
+  1143→                                      : "text-zinc-500 group-hover/row:text-zinc-300",
+  1144→                                )}
+  1145→                              >
+  1146→                                {past ? "··" : toHexByte(v ?? 0)}
+  1147→                              </span>
+  1148→                            );
+  1149→                          })}
+  1150→                        </td>
+  1151→                      ))}
+  1152→                      {(["a", "b"] as const).map((side) => (
+  1153→                        <td key={side + "ascii"} className="whitespace-nowrap border-b border-zinc-900 px-2 py-0.5">
+  1154→                          {cells.map((c) => {
+  1155→                            const v = side === "a" ? c.av : c.bv;
+  1156→                            const past = side === "a" ? c.pastA : c.pastB;
+  1157→                            const ch = v != null && v >= 32 && v < 127 ? String.fromCharCode(v) : "·";
+  1158→                            return (
+  1159→                              <span
+  1160→                                key={side + "asc" + c.off}
+  1161→                                className={cn(
+  1162→                                  "inline-block w-[1ch] text-center",
+  1163→                                  past
+  1164→                                    ? "text-amber-500/30"
+  1165→                                    : c.diff
+  1166→                                      ? "rounded-sm bg-rose-950/50 text-rose-300"
+  1167→                                      : "text-zinc-500 group-hover/row:text-zinc-300",
+  1168→                                )}
+  1169→                              >
+  1170→                                {past ? "·" : ch}
+  1171→                              </span>
+  1172→                            );
+  1173→                          })}
+  1174→                        </td>
+  1175→                      ))}
+  1176→                    </tr>
+  1177→                  );
+  1178→                })}
+  1179→              </tbody>
+  1180→            </table>
+  1181→          ) : (
+  1182→            <LoadingState label="Reading files…" />
+  1183→          )}
+  1184→        </div>
+  1185→      )}
+  1186→
+  1187→      {/* byte pagination footer */}
+  1188→      {dmode === "bytes" && windowBytes > 0 ? (
+  1189→        <div className="flex shrink-0 items-center gap-2 border-t border-zinc-800/80 bg-zinc-900/30 px-3 py-1.5">
+  1190→          <ToolButton label="Previous page" onClick={() => setPage((p) => Math.max(0, p - 1))}><ChevronLeft className="h-3.5 w-3.5" /></ToolButton>
+  1191→          <span className="font-mono text-[10px] text-zinc-400 tabular-nums">
+  1192→            page {safePage + 1}/{totalPages} · {hexOffset(base)}–{hexOffset(base + viewLen)}
+  1193→          </span>
+  1194→          <ToolButton label="Next page" onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}><ChevronRight className="h-3.5 w-3.5" /></ToolButton>
+  1195→          <div className="ml-auto flex items-center gap-1.5">
+  1196→            <input
+  1197→              value={jump}
+  1198→              onChange={(e) => { setJump(e.target.value); setJumpErr(""); }}
+  1199→              onKeyDown={(e) => { if (e.key === "Enter") tryJump(); }}
+  1200→              placeholder="offset e.g. 0x4f2a1"
+  1201→              className="h-7 w-36 rounded-md border border-zinc-700 bg-zinc-900 px-2 font-mono text-[10px] text-zinc-200 placeholder:text-zinc-600 focus:border-emerald-700 focus:outline-none"
+  1202→              aria-label="Jump to offset"
+  1203→            />
+  1204→            <button
+  1205→              type="button"
+  1206→              onClick={tryJump}
+  1207→              className="h-7 rounded-md border border-zinc-700 bg-zinc-900 px-2.5 text-[10px] font-medium text-zinc-300 hover:border-emerald-700 hover:text-emerald-300"
+  1208→            >
+  1209→              Go
+  1210→            </button>
+  1211→            {jumpErr ? <span className="font-mono text-[9px] text-rose-400">{jumpErr}</span> : null}
+  1212→          </div>
+  1213→        </div>
+  1214→      ) : null}
+  1215→
+  1216→      {/* text footer */}
+  1217→      {dmode === "text" && textA && textB ? (
+  1218→        <div className="flex shrink-0 items-center gap-2 border-t border-zinc-800/80 bg-zinc-900/30 px-3 py-1.5">
+  1219→          <FileDiff className="h-3.5 w-3.5 shrink-0 text-zinc-600" />
+  1220→          <span className="truncate font-mono text-[10px] text-zinc-500">
+  1221→            A {textA.lines.length.toLocaleString()} lines · {textA.enc} — B {textB.lines.length.toLocaleString()} lines · {textB.enc}
+  1222→          </span>
+  1223→          {patch ? (
+  1224→            <span className="ml-auto shrink-0 font-mono text-[10px] text-emerald-400/70">patch ready ({patch.length.toLocaleString()} chars)</span>
+  1225→          ) : null}
+  1226→        </div>
+  1227→      ) : null}
+  1228→    </div>
+  1229→  );
+  1230→}
+  1231→
+  1232→export default DiffView;
+  1233→

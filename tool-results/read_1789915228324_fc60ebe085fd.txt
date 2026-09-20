@@ -1,0 +1,625 @@
+     1→"use client";
+     2→
+     3→import * as React from "react";
+     4→import type { FileTab, ViewerId } from "@/lib/types";
+     5→import { detectFromHead } from "@/lib/detect";
+     6→import { VIEWER_REGISTRY, VIEWER_LABELS } from "@/components/viewers/registry";
+     7→import { Landing, LogoMark } from "./landing";
+     8→import { FormatExplorer } from "./format-explorer";
+     9→import { InfoPanel } from "./info-panel";
+    10→import { DiffView } from "./diff-view";
+    11→import { SplitJoinView } from "./split-join-view";
+    12→import { RecentFilesRow } from "./recent-panel";
+    13→import { ShortcutsHelp } from "./shortcuts-help";
+    14→import { analyzeSegments } from "@/lib/splitjoin";
+    15→import { addRecentFile } from "@/lib/recent-files";
+    16→import { FORMAT_STATS } from "@/lib/formats/stats";
+    17→import { ENCODINGS, cn, formatBytes } from "@/lib/utils";
+    18→import {
+    19→  UploadCloud, X, ChevronDown, PanelLeft, FileSearch, ShieldCheck, Github, Keyboard,
+    20→  GitCompare, Combine, Layers, FolderDown,
+    21→} from "lucide-react";
+    22→
+    23→const HEAD_BYTES = 65536;
+    24→const FULL_CAP = 96 * 1024 * 1024;
+    25→const MEDIA_VIEWERS = new Set(["image", "video", "audio", "svg", "pdf", "epub"]);
+    26→/** max files opened from a single recursive folder drop */
+    27→const FOLDER_FILE_CAP = 24;
+    28→
+    29→/* per-category accent dot shown in tab chips (matches landing family hues) */
+    30→const CAT_DOT: Record<string, string> = {
+    31→  image: "bg-emerald-500", video: "bg-rose-500", audio: "bg-amber-500", document: "bg-teal-400",
+    32→  spreadsheet: "bg-lime-500", presentation: "bg-orange-500", ebook: "bg-violet-500", archive: "bg-yellow-400",
+    33→  code: "bg-emerald-400", text: "bg-zinc-400", data: "bg-fuchsia-500", font: "bg-pink-500",
+    34→  "3d": "bg-teal-300", database: "bg-cyan-400", email: "bg-orange-300", geo: "bg-green-500",
+    35→  scientific: "bg-purple-400", game: "bg-fuchsia-400", system: "bg-zinc-200", disk: "bg-stone-400",
+    36→  config: "bg-amber-300", subtitle: "bg-sky-300", binary: "bg-zinc-500", other: "bg-zinc-400",
+    37→};
+    38→
+    39→type AppMode = "viewer" | "diff";
+    40→
+    41→let tabSeq = 0;
+    42→
+    43→export function OmniscopeApp() {
+    44→  const [tabs, setTabs] = React.useState<FileTab[]>([]);
+    45→  const [activeId, setActiveId] = React.useState<string | null>(null);
+    46→  const [explorerOpen, setExplorerOpen] = React.useState(false);
+    47→  const [explorerCat, setExplorerCat] = React.useState<string | null>(null);
+    48→  const [dragOver, setDragOver] = React.useState(false);
+    49→  const [sidebarOpen, setSidebarOpen] = React.useState(true);
+    50→  const [viewerMenu, setViewerMenu] = React.useState(false);
+    51→  const [mode, setMode] = React.useState<AppMode>("viewer");
+    52→  const [joinOpen, setJoinOpen] = React.useState(false);
+    53→  const [helpOpen, setHelpOpen] = React.useState(false);
+    54→  const [joinSeed, setJoinSeed] = React.useState<File[]>([]);
+    55→  const [segmentHint, setSegmentHint] = React.useState<{ files: File[]; base: string; pattern: string } | null>(null);
+    56→  const inputRef = React.useRef<HTMLInputElement>(null);
+    57→  const buffersRef = React.useRef(new Map<string, ArrayBuffer>());
+    58→  const headsRef = React.useRef(new Map<string, Uint8Array>());
+    59→
+    60→  const totalIdentities = React.useMemo(() => FORMAT_STATS.identities, []);
+    61→
+    62→  const activeTab = tabs.find((t) => t.id === activeId) ?? null;
+    63→
+    64→  /* ---------------- file pipeline ---------------- */
+    65→
+    66→  const addFiles = React.useCallback(async (files: File[]) => {
+    67→    for (const file of files.slice(0, 24)) {
+    68→      const id = `f${++tabSeq}-${Date.now()}`;
+    69→      const tab: FileTab = {
+    70→        id, file, name: file.name || "untitled", size: file.size,
+    71→        detected: null, status: "detecting", viewerOverride: null,
+    72→      };
+    73→      setTabs((ts) => [...ts, tab]);
+    74→      setActiveId(id);
+    75→      try {
+    76→        const headBuf = await file.slice(0, HEAD_BYTES).arrayBuffer();
+    77→        const head = new Uint8Array(headBuf);
+    78→        headsRef.current.set(id, head);
+    79→        const detected = detectFromHead(tab.name, head);
+    80→        let objectUrl: string | undefined;
+    81→        if (MEDIA_VIEWERS.has(detected.viewer)) {
+    82→          objectUrl = URL.createObjectURL(file);
+    83→        }
+    84→        if (file.size <= FULL_CAP) {
+    85→          const full = file.size <= head.length ? headBuf : await file.arrayBuffer();
+    86→          buffersRef.current.set(id, full);
+    87→        }
+    88→        setTabs((ts) => ts.map((t) => (t.id === id ? { ...t, detected, status: "ready", objectUrl } : t)));
+    89→        void addRecentFile(file, { name: detected.name, viewer: detected.viewer });
+    90→      } catch (e) {
+    91→        setTabs((ts) => ts.map((t) => (t.id === id ? { ...t, status: "error" } : t)));
+    92→        console.error("detect failed", e);
+    93→      }
+    94→    }
+    95→    // segment auto-detection: when 2+ of the dropped files form a split set, offer to join
+    96→    try {
+    97→      const opened = files.slice(0, 24);
+    98→      const mergedSet = analyzeSegments(opened);
+    99→      if (mergedSet && mergedSet.files.length >= 2) {
+   100→        setSegmentHint({ files: mergedSet.files, base: mergedSet.base, pattern: mergedSet.pattern });
+   101→      }
+   102→    } catch { /* ignore */ }
+   103→  }, []);
+   104→
+   105→  const openJoinView = React.useCallback((seed: File[]) => {
+   106→    setJoinSeed(seed);
+   107→    setJoinOpen(true);
+   108→    setSegmentHint(null);
+   109→  }, []);
+   110→
+   111→  /* ---------------- folder (directory) drop ---------------- */
+   112→
+   113→  const [folderNote, setFolderNote] = React.useState<string | null>(null);
+   114→
+   115→  React.useEffect(() => {
+   116→    if (!folderNote) return;
+   117→    const t = window.setTimeout(() => setFolderNote(null), 9000);
+   118→    return () => window.clearTimeout(t);
+   119→  }, [folderNote]);
+   120→
+   121→  const closeTab = React.useCallback((id: string) => {
+   122→    setTabs((ts) => {
+   123→      const t = ts.find((x) => x.id === id);
+   124→      if (t?.objectUrl) URL.revokeObjectURL(t.objectUrl);
+   125→      const next = ts.filter((x) => x.id !== id);
+   126→      setActiveId((cur) => (cur === id ? next[next.length - 1]?.id ?? null : cur));
+   127→      return next;
+   128→    });
+   129→    buffersRef.current.delete(id);
+   130→    headsRef.current.delete(id);
+   131→  }, []);
+   132→
+   133→  /* ---------------- global drop & paste ---------------- */
+   134→
+   135→  React.useEffect(() => {
+   136→    const onDrop = (e: DragEvent) => {
+   137→      e.preventDefault();
+   138→      setDragOver(false);
+   139→      /*
+   140→       * Directory drop: DataTransferItem.webkitGetAsEntry() must be called
+   141→       * synchronously (the item list is dead after the first await), then the
+   142→       * traversal runs on the entry objects which stay valid.
+   143→       */
+   144→      const items = e.dataTransfer?.items;
+   145→      const entries: FileSystemEntry[] = [];
+   146→      if (items?.length) {
+   147→        for (const it of Array.from(items)) {
+   148→          const en = it.webkitGetAsEntry?.();
+   149→          if (en) entries.push(en);
+   150→        }
+   151→      }
+   152→      if (entries.some((en) => en.isDirectory)) {
+   153→        const out: File[] = [];
+   154→        const walk = async (entry: FileSystemEntry, depth: number): Promise<void> => {
+   155→          if (out.length >= FOLDER_FILE_CAP || depth > 8) return;
+   156→          if (entry.isFile) {
+   157→            const f = await new Promise<File | null>((resolve) =>
+   158→              (entry as FileSystemFileEntry).file(resolve, () => resolve(null)));
+   159→            if (f) out.push(f);
+   160→          } else if (entry.isDirectory) {
+   161→            const reader = (entry as FileSystemDirectoryEntry).createReader();
+   162→            for (;;) {
+   163→              const batch = await new Promise<FileSystemEntry[]>((resolve, reject) =>
+   164→                reader.readEntries(resolve, reject)).catch(() => [] as FileSystemEntry[]);
+   165→              if (!batch.length) break;
+   166→              for (const child of batch) {
+   167→                if (out.length >= FOLDER_FILE_CAP) break;
+   168→                await walk(child, depth + 1);
+   169→              }
+   170→              if (out.length >= FOLDER_FILE_CAP) break;
+   171→            }
+   172→          }
+   173→        };
+   174→        (async () => {
+   175→          for (const en of entries) await walk(en, 0);
+   176→          if (out.length) {
+   177→            setFolderNote(
+   178→              `Folder drop — opened ${Math.min(out.length, FOLDER_FILE_CAP)} file${out.length === 1 ? "" : "s"} ` +
+   179→              `from “${entries.find((en) => en.isDirectory)?.name ?? "folder"}” (cap ${FOLDER_FILE_CAP} per drop).`,
+   180→            );
+   181→            void addFiles(out.slice(0, FOLDER_FILE_CAP));
+   182→          }
+   183→        })();
+   184→        return;
+   185→      }
+   186→      const files = Array.from(e.dataTransfer?.files ?? []);
+   187→      if (files.length) addFiles(files);
+   188→    };
+   189→    const onDragOver = (e: DragEvent) => {
+   190→      e.preventDefault();
+   191→      setDragOver(true);
+   192→    };
+   193→    const onDragLeave = (e: DragEvent) => {
+   194→      if (e.relatedTarget === null) setDragOver(false);
+   195→    };
+   196→    const onPaste = (e: ClipboardEvent) => {
+   197→      const files = Array.from(e.clipboardData?.files ?? []);
+   198→      if (files.length) addFiles(files);
+   199→    };
+   200→    window.addEventListener("drop", onDrop);
+   201→    window.addEventListener("dragover", onDragOver);
+   202→    window.addEventListener("dragleave", onDragLeave);
+   203→    window.addEventListener("paste", onPaste);
+   204→    return () => {
+   205→      window.removeEventListener("drop", onDrop);
+   206→      window.removeEventListener("dragover", onDragOver);
+   207→      window.removeEventListener("dragleave", onDragLeave);
+   208→      window.removeEventListener("paste", onPaste);
+   209→    };
+   210→  }, [addFiles]);
+   211→
+   212→  /* ---------------- keyboard ---------------- */
+   213→
+   214→  React.useEffect(() => {
+   215→    const onKey = (e: KeyboardEvent) => {
+   216→      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "o") {
+   217→        e.preventDefault();
+   218→        inputRef.current?.click();
+   219→      }
+   220→      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+   221→        e.preventDefault();
+   222→        setExplorerCat(null);
+   223→        setExplorerOpen(true);
+   224→      }
+   225→      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "d") {
+   226→        e.preventDefault();
+   227→        setMode((m) => (m === "diff" ? "viewer" : "diff"));
+   228→      }
+   229→      if (e.key === "?" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+   230→        const el = e.target as HTMLElement | null;
+   231→        const tag = el?.tagName?.toLowerCase() ?? "";
+   232→        const typing = tag === "input" || tag === "textarea" || tag === "select" || el?.isContentEditable;
+   233→        if (!typing) {
+   234→          e.preventDefault();
+   235→          setHelpOpen((v) => !v);
+   236→        }
+   237→      }
+   238→      if (e.key === "Escape") {
+   239→        if (helpOpen) { setHelpOpen(false); return; }
+   240→        if (explorerOpen) { setExplorerOpen(false); return; }
+   241→        if (joinOpen) { setJoinOpen(false); return; }
+   242→        if (mode === "diff") { setMode("viewer"); return; }
+   243→        if (activeId) closeTab(activeId);
+   244→      }
+   245→    };
+   246→    window.addEventListener("keydown", onKey);
+   247→    return () => window.removeEventListener("keydown", onKey);
+   248→  }, [activeId, closeTab, explorerOpen, helpOpen, joinOpen, mode]);
+   249→
+   250→  /* ---------------- render ---------------- */
+   251→
+   252→  const effectiveViewer: ViewerId = (activeTab?.viewerOverride ?? activeTab?.detected?.viewer ?? "fallback") as ViewerId;
+   253→  const Viewer = VIEWER_REGISTRY[effectiveViewer] ?? VIEWER_REGISTRY.fallback;
+   254→
+   255→  return (
+   256→    <div
+   257→      className="flex min-h-screen flex-col bg-zinc-950 text-zinc-100 antialiased"
+   258→      style={{ backgroundColor: "#09090b" }}
+   259→    >
+   260→      {/* signature top hairline */}
+   261→      <div className="pointer-events-none fixed inset-x-0 top-0 z-50 h-px bg-gradient-to-r from-transparent via-emerald-500/50 to-transparent" aria-hidden />
+   262→
+   263→      <input
+   264→        ref={inputRef}
+   265→        type="file"
+   266→        multiple
+   267→        className="hidden"
+   268→        onChange={(e) => {
+   269→          const files = Array.from(e.target.files ?? []);
+   270→          if (files.length) addFiles(files);
+   271→          e.target.value = "";
+   272→        }}
+   273→      />
+   274→
+   275→      {/* header */}
+   276→      <header className="sticky top-0 z-40 border-b border-zinc-800/80 bg-zinc-950/90 backdrop-blur">
+   277→        <div className="flex h-14 items-center gap-3 px-3 sm:px-4">
+   278→          <button type="button" onClick={() => { setActiveId(null); }} className="flex items-center gap-2.5" aria-label="Home">
+   279→            <LogoMark />
+   280→            <span className="hidden flex-col items-start leading-none sm:flex">
+   281→              <span className="text-sm font-bold tracking-tight text-zinc-100">OMNISCOPE</span>
+   282→              <span className="text-[9px] uppercase tracking-[0.2em] text-zinc-600">universal file lab</span>
+   283→            </span>
+   284→          </button>
+   285→
+   286→          <div className="ml-2 hidden items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-900/60 px-2.5 py-1 md:flex">
+   287→            <span className="font-mono text-[11px] tabular-nums text-emerald-300">{totalIdentities.toLocaleString()}</span>
+   288→            <span className="text-[10px] text-zinc-500">formats</span>
+   289→          </div>
+   290→
+   291→          <div className="ml-auto flex items-center gap-1.5">
+   292→            <button
+   293→              type="button"
+   294→              onClick={() => setMode((m) => (m === "diff" ? "viewer" : "diff"))}
+   295→              title="Compare two files byte-by-byte"
+   296→              className={cn(
+   297→                "inline-flex h-8 items-center gap-1.5 rounded-lg border px-3 text-xs font-medium transition-colors",
+   298→                mode === "diff"
+   299→                  ? "border-rose-800/70 bg-rose-950/40 text-rose-300"
+   300→                  : "border-zinc-700 bg-zinc-900 text-zinc-300 hover:border-rose-800 hover:text-rose-300",
+   301→              )}
+   302→            >
+   303→              <GitCompare className="h-3.5 w-3.5" />
+   304→              <span className="hidden sm:inline">Compare</span>
+   305→            </button>
+   306→            <button
+   307→              type="button"
+   308→              onClick={() => openJoinView(tabs.map((t) => t.file))}
+   309→              title="Join split files (.001, .r00, .partN…"
+   310→              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-900 px-3 text-xs font-medium text-zinc-300 transition-colors hover:border-amber-700 hover:text-amber-300"
+   311→            >
+   312→              <Combine className="h-3.5 w-3.5" />
+   313→              <span className="hidden sm:inline">Join</span>
+   314→            </button>
+   315→            <button
+   316→              type="button"
+   317→              onClick={() => { setExplorerCat(null); setExplorerOpen(true); }}
+   318→              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-900 px-3 text-xs font-medium text-zinc-300 transition-colors hover:border-emerald-700 hover:text-emerald-300"
+   319→              title="Ctrl+K"
+   320→            >
+   321→              <FileSearch className="h-3.5 w-3.5" />
+   322→              <span className="hidden sm:inline">Explore</span>
+   323→            </button>
+   324→            <button
+   325→              type="button"
+   326→              onClick={() => inputRef.current?.click()}
+   327→              className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 text-xs font-semibold text-white shadow-lg shadow-emerald-950/40 transition-colors hover:bg-emerald-500"
+   328→              title="Ctrl+O"
+   329→            >
+   330→              <UploadCloud className="h-3.5 w-3.5" />
+   331→              <span className="hidden sm:inline">Open file</span>
+   332→            </button>
+   333→            {tabs.length > 0 ? (
+   334→              <button
+   335→                type="button"
+   336→                onClick={() => setSidebarOpen((v) => !v)}
+   337→                className="hidden h-8 w-8 items-center justify-center rounded-lg border border-zinc-700 bg-zinc-900 text-zinc-400 hover:text-zinc-100 lg:inline-flex"
+   338→                title="Toggle info panel"
+   339→                aria-label="Toggle info panel"
+   340→              >
+   341→                <PanelLeft className="h-4 w-4" />
+   342→              </button>
+   343→            ) : null}
+   344→            <button
+   345→              type="button"
+   346→              onClick={() => setHelpOpen(true)}
+   347→              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-700 bg-zinc-900 text-zinc-400 transition-colors hover:border-emerald-700 hover:text-emerald-300"
+   348→              title="Keyboard shortcuts (?)"
+   349→              aria-label="Keyboard shortcuts"
+   350→            >
+   351→              <Keyboard className="h-4 w-4" />
+   352→            </button>
+   353→          </div>
+   354→        </div>
+   355→
+   356→        {/* tab strip */}
+   357→        {tabs.length > 0 ? (
+   358→          <div className="flex h-9 items-center gap-1 overflow-x-auto border-t border-zinc-800/60 px-2 scrollbar-thin">
+   359→            {tabs.map((t) => (
+   360→              <div
+   361→                key={t.id}
+   362→                className={cn(
+   363→                  "group flex h-7 max-w-52 shrink-0 items-center gap-2 rounded-md border px-2.5 text-xs transition-[colors,box-shadow] duration-150",
+   364→                  t.id === activeId
+   365→                    ? "border-emerald-800/60 bg-gradient-to-b from-emerald-950/50 to-emerald-950/20 text-emerald-200 shadow-[inset_0_-2px_0_0_rgba(16,185,129,0.45)]"
+   366→                    : "border-transparent text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200",
+   367→                )}
+   368→              >
+   369→                <span
+   370→                  className={cn(
+   371→                    "h-1.5 w-1.5 shrink-0 rounded-full transition-colors",
+   372→                    t.status !== "ready"
+   373→                      ? "animate-pulse bg-zinc-600"
+   374→                      : CAT_DOT[t.detected?.cat ?? "other"] ?? "bg-zinc-400",
+   375→                  )}
+   376→                  title={t.detected?.cat ?? "detecting"}
+   377→                  aria-hidden
+   378→                />
+   379→                <button
+   380→                  type="button"
+   381→                  onClick={() => setActiveId(t.id)}
+   382→                  className="max-w-40 truncate font-mono text-[11px]"
+   383→                  title={t.detected ? `${t.name}\n${t.detected.name} · ${t.detected.cat}` : t.name}
+   384→                >
+   385→                  {t.name}
+   386→                </button>
+   387→                <span className="shrink-0 font-mono text-[9px] text-zinc-600">{formatBytes(t.size, 0)}</span>
+   388→                <button
+   389→                  type="button"
+   390→                  onClick={() => closeTab(t.id)}
+   391→                  className="shrink-0 rounded-sm p-0.5 text-zinc-600 opacity-0 transition-opacity hover:text-rose-300 group-hover:opacity-100 focus:opacity-100"
+   392→                  aria-label={`Close ${t.name}`}
+   393→                >
+   394→                  <X className="h-3 w-3" />
+   395→                </button>
+   396→              </div>
+   397→            ))}
+   398→            <button
+   399→              type="button"
+   400→              onClick={() => inputRef.current?.click()}
+   401→              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-dashed border-zinc-700 text-zinc-500 transition-colors hover:border-emerald-700 hover:text-emerald-300"
+   402→              title="Open another file (Ctrl+O)"
+   403→              aria-label="Open another file"
+   404→            >
+   405→              <UploadCloud className="h-3.5 w-3.5" />
+   406→            </button>
+   407→          </div>
+   408→        ) : null}
+   409→      </header>
+   410→
+   411→      {/* body */}
+   412→      {(tabs.length === 0 || !activeTab) && mode !== "diff" ? (
+   413→        <Landing
+   414→          onFiles={addFiles}
+   415→          onExplore={(cat) => { setExplorerCat(cat ?? null); setExplorerOpen(true); }}
+   416→          totalIdentities={totalIdentities}
+   417→          recent={<RecentFilesRow onOpenFile={(f) => addFiles([f])} />}
+   418→        />
+   419→      ) : (
+   420→        <main className="flex min-h-0 flex-1 flex-col lg:h-[calc(100vh-5rem)]">
+   421→          {/* viewer header */}
+   422→          {mode === "diff" ? (
+   423→            <div className="flex h-10 shrink-0 items-center gap-2 border-b border-rose-900/40 bg-rose-950/20 px-3">
+   424→              <GitCompare className="h-3.5 w-3.5 text-rose-400" />
+   425→              <span className="text-xs font-semibold text-rose-200">Compare</span>
+   426→              <span className="hidden text-[10px] text-rose-300/60 sm:inline">byte &amp; text diff · hashes · patches</span>
+   427→              <button
+   428→                type="button"
+   429→                onClick={() => setMode("viewer")}
+   430→                className="ml-auto rounded-md border border-rose-900/60 bg-zinc-900 px-2.5 py-1 text-[10px] font-medium text-rose-300 hover:border-rose-600"
+   431→              >
+   432→                Back to viewer
+   433→              </button>
+   434→            </div>
+   435→          ) : activeTab ? (
+   436→            <div className="flex h-10 shrink-0 items-center gap-2 border-b border-zinc-800/80 bg-zinc-950 px-3">
+   437→              <span className="truncate font-mono text-xs text-zinc-300">{activeTab.name}</span>
+   438→              {activeTab.detected ? (
+   439→                <span className={cn(
+   440→                  "hidden shrink-0 rounded-full border px-2 py-0.5 text-[10px] sm:inline-flex",
+   441→                  activeTab.detected.method === "magic" || activeTab.detected.method === "container"
+   442→                    ? "border-emerald-900/60 bg-emerald-950/40 text-emerald-300"
+   443→                    : "border-teal-900/60 bg-teal-950/40 text-teal-300",
+   444→                )}>
+   445→                  {activeTab.detected.name}
+   446→                </span>
+   447→              ) : null}
+   448→              <div className="ml-auto flex items-center gap-1.5">
+   449→                <span className="hidden font-mono text-[10px] text-zinc-600 md:inline">{formatBytes(activeTab.size)}</span>
+   450→                <div className="relative">
+   451→                  <button
+   452→                    type="button"
+   453→                    onClick={() => setViewerMenu((v) => !v)}
+   454→                    className="inline-flex h-7 items-center gap-1 rounded-md border border-zinc-700 bg-zinc-900 px-2.5 text-[11px] font-medium text-zinc-300 hover:border-emerald-700 hover:text-emerald-300"
+   455→                  >
+   456→                    {VIEWER_LABELS[effectiveViewer] ?? effectiveViewer} viewer
+   457→                    <ChevronDown className="h-3 w-3" />
+   458→                  </button>
+   459→                  {viewerMenu ? (
+   460→                    <>
+   461→                      <div className="fixed inset-0 z-40" onClick={() => setViewerMenu(false)} />
+   462→                      <div className="absolute right-0 top-9 z-50 max-h-96 w-48 overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-900 p-1 shadow-xl shadow-black/50 scrollbar-thin">
+   463→                        {Object.entries(VIEWER_LABELS).map(([id, label]) => (
+   464→                          <button
+   465→                            key={id}
+   466→                            type="button"
+   467→                            onClick={() => {
+   468→                              setTabs((ts) => ts.map((t) => (t.id === activeTab.id ? { ...t, viewerOverride: id as ViewerId } : t)));
+   469→                              setViewerMenu(false);
+   470→                            }}
+   471→                            className={cn(
+   472→                              "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[11px] text-zinc-300 hover:bg-zinc-800",
+   473→                              id === effectiveViewer && "text-emerald-300",
+   474→                            )}
+   475→                          >
+   476→                            {label}
+   477→                            {id === (activeTab.detected?.viewer ?? "fallback") ? (
+   478→                              <span className="ml-auto text-[9px] text-zinc-600">auto</span>
+   479→                            ) : null}
+   480→                          </button>
+   481→                        ))}
+   482→                      </div>
+   483→                    </>
+   484→                  ) : null}
+   485→                </div>
+   486→              </div>
+   487→            </div>
+   488→          ) : null}
+   489→
+   490→          {/* segment join hint banner */}
+   491→          {mode !== "diff" && segmentHint ? (
+   492→            <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-amber-900/40 bg-amber-950/20 px-3 py-1.5 text-xs">
+   493→              <Layers className="h-3.5 w-3.5 shrink-0 text-amber-400" />
+   494→              <span className="text-amber-200">
+   495→                <span className="font-mono">{segmentHint.base}</span> — {segmentHint.files.length} split segments detected ({segmentHint.pattern})
+   496→              </span>
+   497→              <button
+   498→                type="button"
+   499→                onClick={() => openJoinView(segmentHint.files)}
+   500→                className="ml-auto rounded-md border border-amber-700/60 bg-amber-900/30 px-2.5 py-1 text-[10px] font-semibold text-amber-200 hover:border-amber-500"
+   501→              >
+   502→                Join them
+   503→              </button>
+   504→              <button
+   505→                type="button"
+   506→                onClick={() => setSegmentHint(null)}
+   507→                className="rounded-sm p-1 text-amber-300/60 hover:text-amber-200"
+   508→                aria-label="Dismiss join suggestion"
+   509→              >
+   510→                <X className="h-3.5 w-3.5" />
+   511→              </button>
+   512→            </div>
+   513→          ) : null}
+   514→
+   515→          {/* folder drop note banner */}
+   516→          {mode !== "diff" && folderNote ? (
+   517→            <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-teal-900/40 bg-teal-950/20 px-3 py-1.5 text-xs">
+   518→              <FolderDown className="h-3.5 w-3.5 shrink-0 text-teal-400" />
+   519→              <span className="text-teal-200">{folderNote}</span>
+   520→              <button
+   521→                type="button"
+   522→                onClick={() => setFolderNote(null)}
+   523→                className="ml-auto rounded-sm p-1 text-teal-300/60 hover:text-teal-200"
+   524→                aria-label="Dismiss folder note"
+   525→              >
+   526→                <X className="h-3.5 w-3.5" />
+   527→              </button>
+   528→            </div>
+   529→          ) : null}
+   530→
+   531→          <div className="flex min-h-0 flex-1">
+   532→            {/* viewer / diff */}
+   533→            <div className="min-w-0 flex-1 bg-zinc-950">
+   534→              {mode === "diff" ? (
+   535→                <div className="h-full min-h-[70vh] lg:min-h-0">
+   536→                  <DiffView
+   537→                    initialA={activeTab?.file ?? null}
+   538→                    initialB={tabs.find((t) => t.id !== activeId && t.id !== activeTab?.id)?.file ?? null}
+   539→                    onClose={() => setMode("viewer")}
+   540→                  />
+   541→                </div>
+   542→              ) : activeTab && activeTab.status !== "detecting" ? (
+   543→                <div className="h-full min-h-[70vh] lg:min-h-0">
+   544→                  <Viewer
+   545→                    file={activeTab.file}
+   546→                    arrayBuffer={buffersRef.current.get(activeTab.id) ?? null}
+   547→                    head={headsRef.current.get(activeTab.id) ?? new Uint8Array()}
+   548→                    detected={activeTab.detected ?? { record: null, name: "Unknown", cat: "binary", viewer: "hex", mime: "application/octet-stream", method: "unknown" }}
+   549→                    fileName={activeTab.name}
+   550→                    onOpenFile={(f) => addFiles([f])}
+   551→                  />
+   552→                </div>
+   553→              ) : (
+   554→                <div className="flex h-full items-center justify-center gap-2 text-sm text-zinc-500">
+   555→                  <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-400" />
+   556→                  Reading &amp; identifying…
+   557→                </div>
+   558→              )}
+   559→            </div>
+   560→            {/* sidebar */}
+   561→            {activeTab && sidebarOpen ? (
+   562→              <aside className="hidden w-72 shrink-0 border-l border-zinc-800/80 bg-zinc-950/60 lg:block">
+   563→                <InfoPanel tab={activeTab} onClose={() => closeTab(activeTab.id)} />
+   564→              </aside>
+   565→            ) : null}
+   566→          </div>
+   567→        </main>
+   568→      )}
+   569→
+   570→      {/* footer */}
+   571→      <footer className="mt-auto border-t border-zinc-800/80 bg-zinc-950/95 px-4 py-2.5">
+   572→        <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-4 gap-y-1.5 text-[10px] text-zinc-500">
+   573→          <span className="inline-flex items-center gap-1.5 text-zinc-400">
+   574→            <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />
+   575→            100% client-side — bytes never leave your browser
+   576→          </span>
+   577→          <button
+   578→            type="button"
+   579→            onClick={() => setHelpOpen(true)}
+   580→            className="inline-flex items-center gap-1.5 rounded-md border border-zinc-800 bg-zinc-900/60 px-2 py-1 text-zinc-400 transition-colors hover:border-emerald-800 hover:text-emerald-300"
+   581→            title="Keyboard shortcuts (?)"
+   582→          >
+   583→            <Keyboard className="h-3 w-3" />
+   584→            <kbd className="rounded border border-zinc-700 bg-zinc-900 px-1 font-mono">?</kbd>
+   585→            all shortcuts
+   586→          </button>
+   587→          <span className="hidden items-center gap-1.5 md:inline-flex text-zinc-600">
+   588→            <span className="h-1 w-1 rounded-full bg-emerald-500/50" aria-hidden />
+   589→            compare · join · recents · folders · bulk extract · verify checksums · converters · forensic reports
+   590→          </span>
+   591→          <span className="ml-auto hidden items-center gap-1.5 sm:inline-flex">
+   592→            <Github className="h-3.5 w-3.5" />
+   593→            HTML · CSS · JavaScript only — deploys to GitHub Pages
+   594→          </span>
+   595→        </div>
+   596→      </footer>
+   597→
+   598→      {/* drag overlay */}
+   599→      {dragOver ? (
+   600→        <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/80 backdrop-blur-sm">
+   601→          <div className="rounded-2xl border-2 border-dashed border-emerald-500 bg-emerald-950/20 px-12 py-10 text-center">
+   602→            <UploadCloud className="mx-auto mb-3 h-14 w-14 animate-bounce text-emerald-400" />
+   603→            <div className="text-lg font-semibold text-emerald-200">Drop to open</div>
+   604→            <div className="mt-1 text-xs text-emerald-300/60">multiple files welcome</div>
+   605→          </div>
+   606→        </div>
+   607→      ) : null}
+   608→
+   609→      <FormatExplorer open={explorerOpen} onOpenChange={setExplorerOpen} initialCat={explorerCat} />
+   610→
+   611→      {/* keyboard shortcuts sheet */}
+   612→      <ShortcutsHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
+   613→
+   614→      {/* split-file joiner overlay */}
+   615→      {joinOpen ? (
+   616→        <SplitJoinView
+   617→          initialFiles={joinSeed}
+   618→          onOpenMerged={(f) => { setJoinOpen(false); void addFiles([f]); }}
+   619→          onClose={() => setJoinOpen(false)}
+   620→        />
+   621→      ) : null}
+   622→    </div>
+   623→  );
+   624→}
+   625→

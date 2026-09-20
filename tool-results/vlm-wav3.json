@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "Yes. A green audio waveform is clearly visible, filling the majority of the canvas area in the viewer. It displays a diamond-like shape with vertical lines representing the audio data against a dark background.",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1789901921,
+  "id": "2026092018583843b241b049764210",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "2026092018583843b241b049764210",
+  "usage": {
+    "completion_tokens": 40,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 1264,
+    "prompt_tokens_details": {
+      "cached_tokens": 2
+    },
+    "total_tokens": 1304
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "Yes, the colored note bars (green) are clearly visible against the dark background of the piano roll canvas. There are no apparent rendering problems; the notes, grid lines, and piano keys are all rendered sharply and legibly.",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1789901943,
+  "id": "20260920185901d191495eb033467a",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "20260920185901d191495eb033467a",
+  "usage": {
+    "completion_tokens": 47,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 1268,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 1315
+  }
+}

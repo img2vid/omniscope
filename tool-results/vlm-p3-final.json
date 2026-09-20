@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "**Screenshot 1: Landing Page**\n*   **Rating: 9/10**\n*   **Visual Bugs:** None. The layout is clean, typography is highly readable, and the dropzone is well-defined. The \"N\" badge in the bottom-left corner feels slightly like a debug artifact, but it’s minor.\n\n**Screenshot 2: Split Text-Diff View**\n*   **Rating: 8/10**\n*   **Visual Bugs:** \n    *   **Truncated Metadata:** The file size/hash text under `config-old.yml` and `config-new.yml` is cut off (e.g., `...cfff6_`), making it look unfinished.\n    *   **Awkward Spacing:** There is excessive vertical whitespace between the file headers and the actual diff content.\n\n**Screenshot 3: Keyboard Shortcuts Modal**\n*   **Rating: 9/10**\n*   **Visual Bugs:** \n    *   **Minor Alignment Inconsistency:** The \"TOOLS\" and \"VIEWERS\" section headers are slightly misaligned vertically with the \"GLOBAL\" header (they appear a few pixels lower).\n    *   **Readability:** The sub-text under \"Merge split archives\" (`.001`, `.r00`...) is very faint compared to other descriptions.",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1789907961,
+  "id": "20260920203910e47adadb62bd4480",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "20260920203910e47adadb62bd4480",
+  "usage": {
+    "completion_tokens": 265,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 2737,
+    "prompt_tokens_details": {
+      "cached_tokens": 2
+    },
+    "total_tokens": 3002
+  }
+}
