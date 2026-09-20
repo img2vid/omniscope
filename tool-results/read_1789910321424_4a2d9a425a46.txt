@@ -1,0 +1,402 @@
+   400→- Verification: bunx eslint on both files → 0 errors 0 warnings; bunx tsc --noEmit → 0 errors in my files
+   401→  (only pre-existing errors remain in audio-viewer.tsx — modified by another agent, untouched by me);
+   402→  bun SSR-guard test: 15/15 (indexedDB undefined → listRecentFiles [] / getRecentFile null / add+remove+
+   403→  clear no-op, no throw; formatRecentWhen all buckets); full IndexedDB logic test with fake-indexeddb in
+   404→  scratch: 17/17 (newest-first list, limit, blob byte round-trip, dedupe update, same-name-diff-size new
+   405→  entry, oversized → cached=false + blob null, remove single, cap at 50 evicting oldest, clear); react-dom/
+   406→  server renderToString smoke (skeleton + label, no recents leak, default === named export); all scratch
+   407→  files deleted; dev.log clean (GET / 200, no compile breakage)
+   408→- Work record also written to agent-ctx/4-c-recent-files.md
+   409→
+   410→Stage Summary:
+   411→- Delivered: src/lib/recent-files.ts (RecentEntry, RECENT_CACHE_CAP, addRecentFile, listRecentFiles,
+   412→  getRecentFile, removeRecentFile, clearRecentFiles, formatRecentWhen) and
+   413→  src/components/omniscope/recent-panel.tsx (RecentFilesRow + default export). No existing file edited.
+   414→- Integration notes for orchestrator: (1) in app-shell's addFiles, after detectFromHead completes call
+   415→  `void addRecentFile(file, { name: detected.name, viewer: detected.viewer })`; (2) render
+   416→  `<RecentFilesRow onOpenFile={(f) => addFiles([f])} />` on the landing — suggested right after the drop
+   417→  zone section (before "try a generated sample"), it self-hides when there are no recents; (3) dedupe also
+   418→  refreshes mime + cached blob on re-open, and `cached` is recomputed from actual blob presence at read
+   419→  time so quota-evicted blobs degrade honestly to the amber "re-open from disk" hint.
+   420→
+   421→---
+   422→Task ID: 4-b
+   423→Agent: split-join (general-purpose)
+   424→Task: Client-side split/segmented file set detection (.001/.r00/.partN.rar/.z01+.zip) + in-browser joiner UI
+   425→
+   426→Work Log:
+   427→- Read worklog.md, app-shell.tsx, viewer-ui.tsx, utils.ts, families.ts for conventions (zinc-950 dark, emerald/amber/rose, lucide, shared chrome kit)
+   428→- Created src/lib/splitjoin.ts — pure TS, zero imports, no DOM deps:
+   429→  * parseSegmentName: case-insensitive regexes for .001-.999 (3-digit, 1-999), .r00-.r99 (rar = volume 0), .partN.rar (leading zeros ok, N>=1), .z01-.z99 (zip = last part)
+   430→  * analyzeSegments: dedupe by lowercased name+size, group by (kind, lowercased base), attach companion .rar (index 0, prepended) / .zip (index maxZ+1, appended), require >= 2 files per set, sort by index, gap detection over expected range (numeric/partN 1..max; rxx 0..max incl. the .rar; zipx 1..maxZ+1 incl. the .zip slot), multiple qualifying sets -> largest then most complete then alphabetical; returns the exact spec interface (kind "zipx" for pkzip spanning), else null
+   431→  * joinFiles: 512 MB cap check BEFORE any read (friendly Error with MB figures), then sequential file.arrayBuffer() per part, pushes Uint8Array parts, reports (doneBytes, totalBytes) per completed file, new Blob(parts) at the end
+   432→- Created src/components/omniscope/split-join-view.tsx — "use client", fixed inset-0 overlay dialog (full-height flex column: header / scroll body / action footer with safe-area padding):
+   433→  * drop zone = keyboard-focusable <button> (click-to-browse via hidden multi-file input + drag/drop with stopPropagation so the global app handlers stay quiet; entire overlay also accepts drops); working set dedupes by name+size, per-file remove + clear-all
+   434→  * live analysis: "Detected pattern" SectionCard (base, pattern, count/total, kind chip, complete/missing chip, ordered segment list with index chips in mono, amber missing-segment warnings with reconstructed filenames, editable merged-name input backed by per-suggestion override map — no setState-in-effect)
+   435→  * join button (emerald, disabled without a set, Loader2 spinner + progress bar with mono done/total bytes); result card keeps the blob in state with "Open in Omniscope" (File([blob], name, octet-stream) -> onOpenMerged) + real <a download> anchor, re-openable/re-downloadable; inline rose error card for cap/read failures; instructions card listing all 4 recognized patterns with examples when no set detected
+   436→  * Esc closes via capture-phase keydown (stopPropagation so app-level Esc doesn't also close a tab); object URLs revoked on replace/unmount; framer-motion card entrances; aria-labels + focus-visible rings throughout
+   437→- Verification: bunx eslint both files -> 0 errors 0 warnings; bunx tsc --noEmit -> 0 errors in my files (only 2 pre-existing errors in audio-viewer.tsx, a file being edited concurrently by another agent — untouched by me); scratch bun logic test in /tmp: 51/51 pass (numeric gap missing=[3], rxx rar-first ordering, partN + leading zeros + gaps, zipx z-order + missing trailing .zip + z-gaps, no-match/mixed/null cases, case-tolerant grouping, dedupe, multi-group largest-wins, dotted bases, join byte-order round-trip, monotonic progress, 512MB cap Error, read-failure propagation) — scratch deleted; dev.log tailed: compiles clean, GET / 200
+   438→
+   439→Stage Summary:
+   440→- Delivered src/lib/splitjoin.ts (analyzeSegments + joinFiles + JOIN_SIZE_CAP, 100% pure TS) and src/components/omniscope/split-join-view.tsx (SplitJoinView named + default export). Joining happens fully in-browser, capped at 512 MB.
+   441→- Integration (orchestrator): render <SplitJoinView initialFiles={segments} onOpenMerged={(f) => addFiles([f])} onClose={...} /> whenever opened files match segment extensions (families.ts .001-.999/.rNN/.zNN records or .partN.rar) or via a header "Join" button — it renders as a self-contained fixed overlay (z-50), so mount point doesn't matter. Note: it swallows Esc and drag/drop while open (by design). No existing files were edited.
+   442→
+   443→---
+   444→Task ID: 5
+   445→Agent: orchestrator (Z.ai Code)
+   446→Task: Phase-2 QA, bug fixes, three new features (hex diff, split-join, recent files), VLM-driven styling polish
+   447→
+   448→Work Log:
+   449→- Reviewed worklog + full QA pass via agent-browser: landing (10,014 counter), PNG/WAV/ZIP/MIDI viewers,
+   450→  format explorer, no console errors. dev server + lint healthy at session start.
+   451→- VLM screenshot review raised "audio waveform black void" → CONFIRMED REAL BUG:
+   452→  audio-viewer.tsx waveform bar math inverted (top = mid + maxs*scale put max BELOW center →
+   453→  bot-top negative → Math.max(1, negative) = 1px dots; only 1.4% canvas pixels drawn).
+   454→- FIXED audio-viewer.tsx: correct envelope math (max up / min down), vertical gradient bars,
+   455→  center reference line, amber playhead overlay div, ResizeObserver redraw on container resize,
+   456→  guard W<2/H<2. Also fixed spectrogram DPR bug (was putImageData at CSS-pixel size into a
+   457→  dpr-scaled canvas → half blank; now draws at device resolution + ResizeObserver).
+   458→  Verified: 49.3% canvas pixels now drawn; VLM confirms "waveform clearly visible".
+   459→- FIXED Home button dead-end: clicking Home set activeId=null but Landing only rendered when
+   460→  tabs.length===0 → blank "Reading & identifying…" state. Landing now renders whenever
+   461→  !activeTab (tab strip stays for navigation). Verified via agent-browser.
+   462→- NEW FEATURE — Binary Compare (Task 4-a; subagent failed twice on token limits, built by
+   463→  orchestrator): src/components/omniscope/diff-view.tsx. Exports DiffView({initialA, initialB,
+   464→  onClose}) + computeDiffHunks(). A/B slots (click-browse + drag-drop w/ stopPropagation, swap),
+   465→  chunked SHA-256 (8MB slices, UI never blocks), 128MB compare window cap w/ amber truncation
+   466→  notice, identical-hash fast path (emerald verdict), side-by-side hex+ASCII 16B/rows with
+   467→  rose-950/60 differing cells + amber ghost bytes past EOF + per-cell title tooltips
+   468→  ("0x0004F2A1: 3A → 41"), 4096-byte paged virtualization + prev/next + jump-to-offset
+   469→  (decimal/0x-hex), hunk navigator strip (rose chips, prev/next cycle, "3/4772" counter),
+   470→  stats bar (diff bytes, similarity %, hunks, first diff offset), copy-summary button.
+   471→  computeDiffHunks: gap<16 merging, tail hunks, 5000 cap. 7/7 bun logic tests pass
+   472→  (identical→0, single→1, gap4→merged, gap20→2, tail, diff+tail, empty). Wired into app-shell:
+   473→  header Compare button (Ctrl+D toggle, Esc exits), prefills A=activeTab, B=next tab.
+   474→  agent-browser verified: 4,900 diff bytes, 2.12% similar, 4,772 hunks, first 0x23, hunk nav,
+   475→  jumps to 0x100 (page 1) and 0x1300 (page 2), VLM-verified hex rendering.
+   476→- NEW FEATURE — Split-file Join (Task 4-b, subagent): src/lib/splitjoin.ts (analyzeSegments:
+   477→  .NNN/.rNN+.rar/.partN.rar/.zNN+.zip patterns, gap detection, 51/51 tests) +
+   478→  src/components/omniscope/split-join-view.tsx (self-contained overlay: drop/browse segments,
+   479→  live pattern detection card, ordered segment list, missing-part warnings, editable merged
+   480→  name, join w/ progress bar, 512MB cap, Open in Omniscope + Download). Wired: header Join
+   481→  button + auto-detected segment banner (amber, "Join them") when 2+ opened files form a set.
+   482→  agent-browser verified end-to-end: backup.zip.001/.002/.003 → joined → opened as ZIP Archive tab.
+   483→- NEW FEATURE — Recent files (Task 4-c, subagent): src/lib/recent-files.ts (raw IndexedDB,
+   484→  db omniscope-recents, 50-entry cap, 8MB blob cache, name+size dedupe, SSR guards, never
+   485→  throws; 17/17 fake-indexeddb tests) + src/components/omniscope/recent-panel.tsx
+   486→  (RecentFilesRow: hydration-safe lazy load, mono chips w/ format dot+icon+size+relative time,
+   487→  click→lazy blob fetch→reopen, "not cached" amber hint, per-chip remove, inline clear-all
+   488→  confirm, returns null when empty). Wired: addRecentFile called in addFiles pipeline after
+   489→  detection; RecentFilesRow rendered on landing between dropzone and samples.
+   490→- STYLING POLISH (VLM review round 1 → fixes → VLM review round 2):
+   491→  viewer-ui.tsx Field values zinc-200→zinc-100 (VLM round 2: "scanning effortless"),
+   492→  SectionCard hover:border-zinc-700; archive-viewer zebra rows (idx%2 bg-zinc-900/40) +
+   493→  row title tooltips + stronger hover; audio-viewer Tags empty state (dashed border card w/
+   494→  icon + "ID3/Vorbis/FLAC metadata would appear here" — VLM round 2 confirms); landing
+   495→  headline gradient narrowed to emerald/teal family (dropped jarring amber), dropzone py-14;
+   496→  info-panel card gap-4. VLM round 2 ratings: 8.5/9/9/8 (round 1 issues resolved).
+   497→  Round-2 leftover notes (not bugs): tab chip in header on landing is the file strip (by
+   498→  design), "clear all" styling minor, footer density minor.
+   499→- INFRA: dev server OOM-killed mid-session (2.1GB RSS after many hot reloads, 4GB container);
+   500→  sandbox kills backgrounded processes between Bash calls (nohup/setsid insufficient) →
+   501→  created dev-daemon.js (ESM, detached spawn via node:child_process, child.unref, PPID 1)
+   502→  → server now survives across calls. Restart procedure:
+   503→  cd /home/z/my-project && bun dev-daemon.js && sleep ~15 (first compile ~10s).
+   504→- tsc --noEmit: 0 errors; eslint: 0 errors/warnings (dev-daemon converted to ESM imports);
+   505→  dev.log healthy; agent-browser full regression pass green.
+   506→
+   507→Stage Summary:
+   508→- OMNISCOPE phase 2 complete: 3 real bugs fixed (waveform inversion, spectrogram DPR, Home
+   509→  dead-end), 3 major features added (Binary Compare view, Split-file Joiner w/ auto-detect
+   510→  banner, IndexedDB Recent files), styling polished per two VLM review rounds.
+   511→- App remains 100% client-side, single / route, 10,014 format identities, 39 viewer engines +
+   512→  compare/join/recents tooling. All new code follows zinc-950/emerald-teal-amber-rose palette.
+   513→- Known limitations (unchanged): RAR/7z listing identify-only, WOFF2 metrics, compressed
+   514→  DICOM, legacy .doc/.ppt text recovery. Diff compare caps at 128MB window; join at 512MB.
+   515→- Next-phase candidates: NFO→PNG render, CSV↔XLSX converters, text-line diff mode in
+   516→  compare view, diff of >2 files, recents grouping by format, keyboard shortcut help modal.
+   517→
+   518→---
+   519→Task ID: 6
+   520→Agent: orchestrator (Z.ai Code)
+   521→Task: Phase-3 — QA assessment, text-line diff engine + Compare Text mode, shortcuts
+   522→help modal, NFO→PNG export, styling polish round 3, VLM reviews
+   523→
+   524→Work Log:
+   525→- Reviewed full worklog (phases 1–2 complete). QA pass via agent-browser: dev server healthy
+   526→  (GET / 200), landing 10,014 counter, PNG/WAV/ZIP sample viewers, Compare open/close
+   527→  (Ctrl+D/Esc), Join overlay — 0 console errors; lint 0 errors; tsc only pre-existing
+   528→  examples/skills errors (not app code). VERDICT: stable → proceeded to new features.
+   529→- NEW ENGINE — src/lib/textdiff.ts (pure TS, zero deps, 30/30 bun logic tests PASS):
+   530→  * splitLines (CRLF/CR/LF), decodeTextual (UTF-8 → windows-1252 fallback when >0.5%
+   531→    U+FFFD), looksTextual (≥90% printable heuristic on first 64KB)
+   532→  * diffLines: hybrid patience diff — common prefix/suffix trim → patience anchors (lines
+   533→    unique in both ranges) + LIS over anchor pairs (O(k log k)) → DP LCS for regions ≤300×300
+   534→    cells and anchor-less regions ≤4M cells (Uint32Array table) → wholesale replace fallback;
+   535→    recursion depth cap 48; no spread-push (stack safe); normalizeOps reorders each change
+   536→    run deletes-before-inserts (git style). Verified optimal on pathological alternating
+   537→    2000×2000 input (edit distance 2 found, coverage invariant holds, <30ms).
+   538→  * textDiffStats (added/removed/changed=min(d,i) per run/hunks/equal);
+   539→    buildUnifiedPatch: standard git-style unified diff (3-line context, @@ headers, hunk
+   540→    clustering at >6 equal gap, "\ No newline at end of file" markers).
+   541→  * Test suite validated: identical/insert/delete/modify/empty/wholesale/repeated-lines/
+   542→    12k-line perf (19ms)/coverage-invariant/patch format + hunk headers + del-before-add/
+   543→    no-newline marker/multi-hunk (3 hunks)/cp1252 fallback/looksTextual — all pass. (4
+   544→    initial "failures" were wrong test expectations, corrected after analysis.)
+   545→- NEW FEATURE — Compare Text mode (diff-view.tsx rewritten, byte mode intact):
+   546→  * Toolbar Segmented Bytes/Text; AUTO mode selection when both sides look textual
+   547→    (modeTouched ref guards manual choice; re-evaluates on file change)
+   548→  * Text window: 8MB decode cap + 60k line cap per side (amber truncation chip)
+   549→  * Unified view (default): dual A/B line-number gutters, −/+ markers, rose/emerald row
+   550→    tints, 3-line context, equal runs >8 collapse into "⋯ N unchanged lines — expand"
+   551→    buttons (expandedGaps Set), EOF footer marker, 4000-row pagination w/ "Show more"
+   552→  * Split view: aligned sides, del/ins runs paired index-wise into "mod" rows, per-side
+   553→    EOF·N-lines markers filling the shorter pane, hover row highlight
+   554→  * Wrap toggle (whitespace-pre ↔ pre-wrap break-all); stats chips (+added −removed ~changed
+   555→    hunks unchanged, encoding mismatch chip, "textually identical" emerald verdict when
+   556→    ops have no changes but hashes differ); footer shows per-side line counts + encodings +
+   557→    "patch ready (N chars)"
+   558→  * Copy patch / Save .patch (real .patch download via Blob anchor); copy-summary now
+   559→    mode-aware (text stats vs byte stats)
+   560→  * React-safe: useMemo results carry {error} instead of setState-in-render (fixed my own
+   561→    anti-pattern before shipping); TS5076 ?? || parens fixed
+   562→  * agent-browser verified end-to-end: config-old/new.yml → auto-text, 8 added / 6 removed
+   563→    / ~6 changed / 7 hunks (matches hand count exactly), patch 600 chars, gap expand,
+   564→    wrap (31 elements), split (25 rows), 12k-line big files → 32/34/32 stats in <1s,
+   565→    32 collapse gaps, 0 console errors.
+   566→- NEW FEATURE — ShortcutsHelp modal (src/components/omniscope/shortcuts-help.tsx):
+   567→  4 groups (Global/Files & tabs/Tools/Viewers) with kbd chips + icon keys, hints, Esc
+   568→  capture-phase close, backdrop click close. Wired: "?" key (ignored while typing in
+   569→  inputs), header keyboard button, footer chip; Esc priority chain now starts with
+   570→  helpOpen. Verified via header button + Shift+/ real keypress (toggles).
+   571→- NEW FEATURE — NFO→PNG export (nfo-viewer.tsx): canvas render honoring color mode
+   572→  (glow via shadowBlur), font size, CRT scanlines; DPR 2× scale with 40MP area + 16384px
+   573→  side guards (auto downscale to 0.5×, line truncation notice); emerald result chip in
+   574→  footer ("Saved 958×336 PNG" verified).
+   575→- STYLING ROUND 3:
+   576→  * Tab strip: per-category accent dot (CAT_DOT map mirrors landing hues, pulsing zinc
+   577→    while detecting, title=cat tooltip) + trailing dashed "+" open-file button
+   578→  * Dropzone: kbd hint row (Ctrl+O open · Ctrl+V paste a file · ? shortcuts)
+   579→  * Footer: compact py-2.5, shortcuts chip button (replaces 4 inline kbds), GitHub Pages
+   580→    note kept; header compare banner text generalized ("byte & text diff · hashes · patches")
+   581→  * Recents "clear all": ghost pill chip + inline confirm pill (rose tint, yes/no buttons)
+   582→  * Compare split/unified EOF markers (VLM round-1 feedback: "empty black space at pane
+   583→    bottom" → resolved)
+   584→- INFRA: dev server died once mid-session (sandbox process reaper) → restarted via
+   585→  `bun dev-daemon.js` (procedure from phase 2), healthy since. Next.js dev overlay "1
+   586→  Issue" badge investigated: caused by my own failed agent-browser eval (TypeError thrown
+   587→  in page context), NOT an app bug — fresh reload shows 0 issues, full flows log 0 errors.
+   588→- VERIFICATION: tsc --noEmit 0 app errors; eslint 0/0; VLM review round: unified 8/10,
+   589→  split 8/10 (hash truncation by-design w/ tooltip; EOF fixed), shortcuts 9/10, landing
+   590→  9/10. Remaining notes are subjective (hint text faintness, grid header alignment).
+   591→
+   592→Stage Summary:
+   593→- OMNISCOPE phase 3 complete: Compare gained a full text-diff mode (patience+LCS engine,
+   594→  unified/split, patches, wrap, collapse gaps, EOF markers, auto text/bytes), shortcuts
+   595→  help modal (? key + buttons), NFO→PNG canvas export, and styling round 3 (tab dots,
+   596→  dropzone kbd hints, footer chip, recents pills).
+   597→- App remains 100% client-side single-route; 10,014 format identities, 39 viewer engines,
+   598→  compare/join/recents/shortcuts tooling. All engine logic covered by 30/30 bun tests.
+   599→- Known limitations (unchanged): RAR/7z identify-only, WOFF2 metrics, compressed DICOM,
+   600→  legacy .doc/.ppt recovery; text diff window 8MB/60k lines per side; byte window 128MB.
+   601→- Next-phase candidates: CSV↔XLSX converters, >2-file diff, recents grouping by format,
+   602→  in-diff syntax highlighting (hl.js per language), text diff word-level intra-line
+   603→  highlighting (char-level within changed pairs), NFO→PNG at 1:1 with bg color option.
+   604→
+   605→---
+   606→Task ID: 7
+   607→Agent: orchestrator (Z.ai Code)
+   608→Task: Phase-4 — QA assessment, word-level diff highlighting, text-diff change-block
+   609→navigation (n/p), CSV→XLSX export, styling round 4, VLM reviews
+   610→
+   611→Work Log:
+   612→- QA assessment at round start: dev server healthy, landing (10,014 counter + kbd hints),
+   613→  PNG/MIDI viewers, Compare text mode (8 added/6 removed/7 hunks), 0 console errors,
+   614→  lint/tsc clean. VERDICT: stable → proceeded to new features (phase-3 next-phase
+   615→  candidates used as backlog).
+   616→- NEW ENGINE — wordDiff in src/lib/textdiff.ts: tokenizes paired lines
+   617→  (/\s+|[A-Za-z0-9_]+|[^\sA-Za-z0-9_]/g) and re-runs the same patience/LCS machinery on
+   618→  token arrays → WordPart[] {text, changed} per side with adjacent-part merging; caps at
+   619→  2000 chars/side; null for identical lines. 17/17 bun tests PASS (word change
+   620→  "quick"→"slow", pure insertion, punctuation-merge, round-trip reconstruction,
+   621→  "512"↔"1024" isolated exactly, cap guard, whitespace change, empty side, unicode,
+   622→  500-pairs perf < 500ms, diffLines regression intact).
+   623→- NEW FEATURE — word-level intra-line highlighting in Compare text mode:
+   624→  * wordMap useMemo pairs dels[k]↔ins[k] within each change run (op-index keyed Map);
+   625→    splitRows "mod" rows carry aParts/bParts directly
+   626→  * renderParts renders changed tokens as rounded spans (rose-800/emerald-800 bg) in
+   627→    BOTH unified del/ins rows and split mod rows; "Words" ToolButton toggle (Highlighter
+   628→    icon, default on); verified char-level precision: "2.1.0"→"2.2.0" highlights only
+   629→    "1"→"2"; 12 spans on config fixture, 30 on the 12k-line fixture, 0 errors
+   630→- NEW FEATURE — change-block navigation: unifiedSegs rebuilt with USegItem {op, i}
+   631→  (op-index tracking) + blockId per change run; text-mode navigator bar (Prev/Next +
+   632→    "change N / M" counter + n/p kbd hint chip); goBlock scrolls first row into view
+   633→  (smooth, centered) with double-rAF retry + shownRows expansion when paginated out;
+   634→  n/p keyboard effect (guards typing in inputs, no modifiers); active block gets amber
+   635→  inset left ring + amber-400 gutter numbers; curBlock resets on file swap (verified:
+   636→  3/7 → swap → 1/7); block navigation verified step-by-step (1→2→3→2) and on big file
+   637→  (32 blocks); React batched double-click in single eval explained apparent skip
+   638→  (expected closure behavior, not a bug).
+   639→- NEW FEATURE — CSV viewer "XLSX" export (SheetJS dynamic import, same pattern as
+   640→  xlsx-viewer): aoa_to_sheet of filtered+sorted rows, heuristic !cols widths
+   641→  (500-row scan, wch capped 42), book_new + write "array" → .xlsx download; respects
+   642→  the filter & sort already applied (what-you-see-is-what-you-export).
+   643→- STYLING ROUND 4:
+   644→  * Compare slot hash presentation (VLM flagged twice): proper bordered chip
+   645→    "sha256 d2020475…31d1" (first 8 + last 4), click-to-copy with stopPropagation
+   646→    (verified: picker does NOT open), keyboard accessible, full-hash title tooltip
+   647→  * Active-block gutter contrast amber-500/80 → amber-400 (unified + split)
+   648→  * ShortcutsHelp modal entrance animation (framer-motion: opacity/scale/y 180ms
+   649→    ease-out) + Tools group documents n/p ("Next/Previous change block")
+   650→  * Split gutter borders get amber tint on the active block
+   651→- VLM REVIEW ROUND: unified 9/10, split 8/10, modal 9/10. VLM claims investigated
+   652→  programmatically: "split misalignment (critical)" → DISPROVEN (getBoundingClientRect:
+   653→  aTop === bTop on every row, panes 640/641px equal ± border, no horizontal overflow —
+   654→  VLM misread standard blank-pane diff layout); "modal footer cut off" → DISPROVEN
+   655→  (footerBottom 533 < viewport 577, footerVisible true); hash truncation + amber
+   656→  contrast → REAL polish items, both fixed this round.
+   657→- VERIFICATION: tsc 0 app errors; eslint 0/0; dev server healthy throughout; full
+   658→  agent-browser regression (landing → PNG → MIDI → compare auto-text → word spans →
+   659→  block nav → split → EOF markers → CSV sample + XLSX click → shortcuts modal) —
+   660→  0 console errors on every step.
+   661→
+   662→Stage Summary:
+   663→- OMNISCOPE phase 4 complete: text compare now has GitHub-grade word-level highlighting
+   664→  (both views, toggleable) and keyboard-driven change-block navigation with active-block
+   665→  amber ring; CSV tables export to real XLSX workbooks (filter/sort-aware); slot hash
+   666→  chips are click-to-copy; shortcuts modal animated and documents n/p.
+   667→- App remains 100% client-side single-route; 10,014 format identities, 39 viewer engines;
+   668→  textdiff engine now at 47/47 total logic tests (30 line-level + 17 word-level).
+   669→- Known limitations (unchanged): RAR/7z identify-only, WOFF2 metrics, compressed DICOM,
+   670→  legacy .doc/.ppt recovery; text window 8MB/60k lines; byte window 128MB.
+   671→- Next-phase candidates: >2-file diff, syntax highlighting in diff rows (hl.js token
+   672→  mapping), recents grouping by format, hash panel in InfoPanel with copy buttons,
+   673→  NFO→PNG bg color option, joiner auto-window for >512MB sets.
+   674→
+   675→---
+   676→Task ID: 8
+   677→Agent: orchestrator (Z.ai Code)
+   678→Task: Phase-5 — QA assessment, syntax-highlighted text diff, InfoPanel CRC-32 +
+   679→checksum export, recents format-family filter, JSON→CSV + MD→HTML converters,
+   680→Dialog a11y fix, styling round 5, VLM reviews
+   681→
+   682→Work Log:
+   683→- QA assessment at round start (per instructions): dev server healthy (GET / 200),
+   684→  landing (10,014 counter), PNG viewer, Compare text mode (8 added/7 removed/3
+   685→  hunks on fixture), word-level highlighting (16 spans), Join overlay, format
+   686→  explorer search ("flac" → FLAC), shortcuts modal, recent files row — 0 console
+   687→  errors; lint 0/0; tsc only the 4 pre-existing examples/skills errors. VERDICT:
+   688→  stable → proceeded to new features.
+   689→- ONE REAL ISSUE FOUND: Radix warning `Missing Description or aria-describedby
+   690→  for {DialogContent}` from format-explorer.tsx → FIXED by adding
+   691→  `aria-describedby={undefined}` to DialogContent (Radix-recommended). Verified
+   692→  via cleared-console reload + dialog open: warning gone.
+   693→- NEW MODULE — src/lib/hlsyntax.ts (shared hl.js syntax engine, 0 errors):
+   694→  * LANG_BY_EXT map (~120 entries) moved here from code-viewer (single source
+   695→    of truth; code-viewer.tsx refactored to import it — its local copy removed)
+   696→  * loadHljs(): module-level cached promise of `highlight.js/lib/common`
+   697→  * detectLang(fileName, firstLine): extension map + shebang sniff
+   698→  * autoDetectLang(sample, hljs): highlightAuto over 20-language subset, ≤400 lines
+   699→  * tokenizeLines(text, lang, hljs): hljs.highlight → DOMParser walk of the
+   700→    emitted HTML → per-line LineTok[] {text, cls} arrays (innermost span wins,
+   701→    newlines split tokens)
+   702→  * sliceTokens(toks, start, end): char-range slicing so word-diff parts can
+   703→    inherit underlying syntax colors
+   704→- NEW FEATURE — syntax highlighting in Compare text mode (diff-view.tsx):
+   705→  * Language from A's filename → B's filename → content auto-detect; shown in
+   706→    toolbar button title + unified/split header labels ("· yaml")
+   707→  * Whole-text tokenization per side, capped at 400k chars / 20k lines per side
+   708→    (amber chip "syntax off — file over 20,000 lines" when exceeded)
+   709→  * renderLineContent(): merges syntax tokens with word-level changed parts —
+   710→    changed words keep rose/emerald bg while inner tokens keep syntax colors
+   711→    (GitHub-style). Used by BOTH unified rows (toks param added to unifiedRow)
+   712→    and split rows (aToks/bToks looked up per row)
+   713→  * "Syntax" ToolButton toggle (Code2 icon, active state, dimmed when no
+   714→    language); scoped `.dxhl` CSS palette (emerald keywords / amber strings /
+   715→    rose numbers / zinc comments / teal titles / violet attrs — mirrors the code
+   716→    viewer, no blue/indigo); toggle verified: 43 spans on / 0 off / word-diff
+   717→    intact; split view 46 spans; header shows lang in both views
+   718→  * agent-browser verified end-to-end on YAML fixture: 43 hljs tokens
+   719→    (attr/number/string), word spans nested inside token spans
+   720→    (`<span bg-rose-800><span hljs-number>8080</span></span>`), 0 console errors.
+   721→    VLM review: 9/10 "syntax colors clearly visible… highly polished,
+   722→    professional-grade UI"
+   723→- NEW FEATURE — InfoPanel checksums upgrade (info-panel.tsx):
+   724→  * CRC-32 added (8-digit hex, Copyable) — implementation verified against
+   725→    standard vector crc32("123456789") = cbf43926 via bun script
+   726→  * "Copy all checksums" button (clipboard: crc32/md5/sha1/sha256 block with
+   727→    file header) + "Download checksums.txt" button (standalone .checksums.txt
+   728→    with provenance header); both as SectionCard right-slot icon buttons
+   729→  * >50MB amber note when hashes cover the head only
+   730→  * Verified in-browser: CRC-32 5e64229f on sample.png, both buttons present
+   731→- NEW FEATURE — recents format-family filter (recent-panel.tsx):
+   732→  * MAX_VISIBLE 12 → 50 (full store); familyOf() maps viewerId → media/docs/
+   733→    code/data/archives/other
+   734→  * Filter pill row (all N + per-family count pills with family dots, emerald
+   735→    active state) appears only when >3 entries span >1 family; "N shown of M"
+   736→    counter; click pill again to reset; clear-all also resets filter
+   737→  * Verified: "all 7 / media 3 / docs 2 / data 1 / archives 1" pills; clicking
+   738→    media → "3 shown of 7", png+wav visible, nfo hidden
+   739→- NEW FEATURE — JSON→CSV converter (json-viewer.tsx):
+   740→  * csvReady heuristic: root array of objects (≥ tolerance for oddballs)
+   741→  * flattenRow (one nesting level, dot notation), csvCell RFC-style quoting
+   742→    (commas/quotes/newlines), header union from first 2000 rows
+   743→  * "CSV" ToolButton (Table icon, title explains dot-notation) only when
+   744→    csvReady; downloads <basename>.csv text/csv
+   745→  * Verified: users.json (array of 3 objects with nested meta) → button appears,
+   746→    blob download triggered; nested sample object → button correctly absent
+   747→- NEW FEATURE — Markdown→HTML export (markdown-viewer.tsx):
+   748→  * saveStandaloneHtml(): self-contained dark HTML document (embedded CSS ~40
+   749→    rules: GitHub-ish typography on zinc-950, emerald links, zebra tables,
+   750→    emerald blockquote bars), TOC nav with indent levels, escaped titles,
+   751→    generator meta, footer credit; "HTML" ToolButton (Download icon)
+   752→  * Verified: button present on markdown sample, blob download triggered
+   753→- STYLING ROUND 5 (mandatory detail pass):
+   754→  * globals.css: global focus-visible ring (2px emerald, buttons/a/summary/
+   755→    role=button), `.text-shimmer` gradient-pan keyframes (7s, honors
+   756→    prefers-reduced-motion), `.pressable` active:scale feedback
+   757→  * Landing: hero "anything" gradient drifts (text-shimmer), stat cards get
+   758→    gradient bg + hover border, category cards get focus rings + icon lift +
+   759→    active:scale-[0.98], sample chips get pressable feedback + focus ring
+   760→  * App shell: signature 1px emerald top hairline (fixed, pointer-events-none),
+   761→    active tab gets gradient bg + inset emerald underline + tooltip with
+   762→    detected format name · category, footer gains tools summary line
+   763→    ("compare · join · recents · word diff · syntax diff · converters")
+   764→  * viewer-ui kit: ToolButton + Segmented buttons get active:scale-95 press
+   765→    feedback, transform transitions, active inset highlights
+   766→  * VLM review of landing: 9/10 "stunning, professional-grade UI… aesthetic
+   767→    appeal with excellent functional clarity"
+   768→- INFRA: dev server died twice mid-session (sandbox process reaper after heavy
+   769→  hot-reload) → restarted via `bun dev-daemon.js` both times (phase-2
+   770→  procedure still works). Stale console errors from a transient broken
+   771→  intermediate edit state (diff-view) investigated → confirmed gone after
+   772→  fresh reload with cleared console buffer.
+   773→- VERIFICATION: tsc --noEmit 0 app errors; eslint 0/0; agent-browser full
+   774→  regression green (landing + shimmer + pills → PNG + CRC-32 + hairline →
+   775→  JSON CSV click → MD HTML click → explorer dialog (no warning) → compare
+   776→  syntax 43 tokens + 7 word spans + 8 added/3 hunks → shortcuts modal) with
+   777→  0 console errors on a cleared buffer; dev.log healthy.
+   778→
+   779→Stage Summary:
+   780→- OMNISCOPE phase 5 complete: Compare text mode now renders GitHub-grade
+   781→  SYNTAX-HIGHLIGHTED diffs (hl.js tokens merged with word-level highlighting,
+   782→  both unified + split, capped for performance, toggleable); InfoPanel computes
+   783→  CRC-32 and exports/copies full checksum blocks; recents filter by format
+   784→  family; JSON arrays export to CSV (nested-flattened); Markdown exports
+   785→  standalone styled HTML; format-explorer Dialog a11y warning fixed; styling
+   786→  round 5 shipped (top hairline, shimmer hero, tab gradient underline, press
+   787→  feedback, focus rings, footer summary).
+   788→- App remains 100% client-side single-route; 10,014 format identities, 39
+   789→  viewer engines; new shared module src/lib/hlsyntax.ts is the single source
+   790→  of truth for language detection + tokenization (code viewer refactored onto
+   791→  it with zero behavior change).
+   792→- Known limitations (unchanged): RAR/7z identify-only, WOFF2 metrics, compressed
+   793→  DICOM, legacy .doc/.ppt recovery; text window 8MB/60k lines; byte window
+   794→  128MB; syntax diff caps at 400k chars / 20k lines per side.
+   795→- Next-phase candidates: >2-file diff (3-way), in-diff hover blame/lineno
+   796→  deep-links, per-format export matrix (more converters: XLSX→JSON, CSV→JSON,
+   797→  SRT→VTT), image OCR? (no — external), ZIP re-packer/extract-to-blob,
+   798→  IndexedDB file collections/folders, printable forensic report per file,
+   799→  theme accent picker (emerald/amber/rose), >512MB join streaming.
+
+[showing lines 400-799 of 800; use offset=800 with limit to continue reading]

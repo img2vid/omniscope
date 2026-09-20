@@ -1,0 +1,1050 @@
+     1→"use client";
+     2→
+     3→import * as React from "react";
+     4→import { inflateSync, gunzipSync } from "fflate";
+     5→import type { ViewerProps } from "@/lib/types";
+     6→import {
+     7→  ViewerToolbar, ViewerBody, ErrorCard, LoadingState, Chip, EmptyHint, SectionCard,
+     8→  InfoGrid, Field, ToolButton, Segmented,
+     9→} from "./viewer-ui";
+    10→import {
+    11→  cn, formatBytes, formatNum, formatDate, downloadBlob,
+    12→  printabilityRatio, isLikelyValidUtf8, decodeCP437, latin1, hexDumpLine,
+    13→} from "@/lib/utils";
+    14→import { u16le, u32le, asciiAt } from "@/lib/binary";
+    15→import {
+    16→  Archive, File as FileIcon, Folder, Search, Download, X, Lock, Package, Coffee,
+    17→  Disc, Info, FileWarning, ChevronRight, FileText,
+    18→} from "lucide-react";
+    19→
+    20→/* ================================ model ================================ */
+    21→
+    22→interface ArcEntry {
+    23→  path: string;
+    24→  isDir: boolean;
+    25→  size: number;
+    26→  packed: number;
+    27→  method: string;
+    28→  crc: number | null;
+    29→  encrypted: boolean;
+    30→  mtime: number | null;
+    31→  /** returns decompressed bytes; throws with a readable message */
+    32→  read?: () => Uint8Array<ArrayBuffer>;
+    33→}
+    34→
+    35→interface GzMeta {
+    36→  inner: string;
+    37→  originalName?: string;
+    38→  mtime: number | null;
+    39→  os: string;
+    40→  flags: string[];
+    41→}
+    42→
+    43→interface IsoMeta {
+    44→  sysId: string;
+    45→  volId: string;
+    46→  volSpace: number;
+    47→  blockSize: number;
+    48→  joliet: boolean;
+    49→}
+    50→
+    51→interface ArchiveModel {
+    52→  kind: "zip" | "tar" | "gz" | "iso" | "rar" | "7z";
+    53→  subKind?: string;
+    54→  entries: ArcEntry[];
+    55→  comment?: string;
+    56→  bad?: number;
+    57→  tailOnly?: boolean;
+    58→  gz?: GzMeta;
+    59→  iso?: IsoMeta;
+    60→  rar?: { version: string; note: string };
+    61→  z7?: { version: string; nextHeaderOffset: number; nextHeaderSize: number };
+    62→  warnings: string[];
+    63→}
+    64→
+    65→interface ByteSource {
+    66→  bytes: Uint8Array<ArrayBuffer>;
+    67→  /** absolute file offset of bytes[0] */
+    68→  base: number;
+    69→  total: number;
+    70→}
+    71→
+    72→/* ============================== constants ============================== */
+    73→
+    74→const ZIP_METHODS: Record<number, string> = {
+    75→  0: "Stored", 1: "Shrunk", 2: "Reduced-1", 3: "Reduced-2", 4: "Reduced-3", 5: "Reduced-4",
+    76→  6: "Imploded", 8: "Deflate", 9: "Deflate64", 12: "Bzip2", 14: "LZMA", 51: "WavPack",
+    77→  93: "Zstandard", 95: "XZ", 96: "JPEG", 98: "PPMd", 99: "AES",
+    78→};
+    79→
+    80→const IMAGE_TYPES: Record<string, string> = {
+    81→  png: "image/png", apng: "image/apng", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif",
+    82→  webp: "image/webp", bmp: "image/bmp", svg: "image/svg+xml", ico: "image/x-icon", cur: "image/x-icon",
+    83→  avif: "image/avif", tif: "image/tiff", tiff: "image/tiff",
+    84→};
+    85→
+    86→const TEXT_EXTS = new Set([
+    87→  "txt", "md", "markdown", "json", "xml", "html", "htm", "css", "js", "mjs", "cjs", "ts", "tsx", "jsx",
+    88→  "csv", "tsv", "log", "yml", "yaml", "toml", "ini", "cfg", "conf", "nfo", "srt", "vtt", "ass", "ssa",
+    89→  "sql", "py", "rb", "sh", "bash", "zsh", "c", "h", "cpp", "hpp", "rs", "go", "java", "kt", "swift",
+    90→  "properties", "mf", "manifest", "plist", "gitignore", "gitattributes", "env", "svg", "tex", "bib",
+    91→  "rst", "adoc", "bat", "cmd", "ps1", "php", "pl", "lua", "diff", "patch", "lock", "license", "readme",
+    92→]);
+    93→
+    94→const GZ_OS: Record<number, string> = {
+    95→  0: "FAT / MS-DOS", 1: "Amiga", 2: "VMS", 3: "Unix", 4: "VM/CMS", 5: "Atari TOS", 6: "HPFS",
+    96→  7: "Macintosh", 8: "Z-System", 9: "CP/M", 10: "TOPS-20", 11: "NTFS", 12: "QDOS", 13: "Acorn RISC OS", 255: "unknown",
+    97→};
+    98→
+    99→const PREVIEW_CAP = 2 * 1024 * 1024;
+   100→
+   101→/* ============================== byte helpers ============================== */
+   102→
+   103→function u64le(b: Uint8Array, o: number): number {
+   104→  // 64-bit LE as a Number (precise up to 2^53 — enough for file offsets)
+   105→  let v = 0;
+   106→  for (let i = 7; i >= 0; i--) v = v * 256 + (b[o + i] ?? 0);
+   107→  return v;
+   108→}
+   109→
+   110→function extOf(path: string): string {
+   111→  const base = path.slice(path.lastIndexOf("/") + 1);
+   112→  const dot = base.lastIndexOf(".");
+   113→  return dot > 0 ? base.slice(dot + 1).toLowerCase() : "";
+   114→}
+   115→
+   116→function baseOf(path: string): string {
+   117→  return path.slice(path.lastIndexOf("/") + 1) || path;
+   118→}
+   119→
+   120→function dirOf(path: string): string {
+   121→  const i = path.lastIndexOf("/");
+   122→  return i > 0 ? path.slice(0, i + 1) : "";
+   123→}
+   124→
+   125→function dosDateTime(time: number, date: number): number | null {
+   126→  if (!date && !time) return null;
+   127→  const year = ((date >> 9) & 0x7f) + 1980;
+   128→  const mon = ((date >> 5) & 0x0f) || 1;
+   129→  const day = (date & 0x1f) || 1;
+   130→  const h = (time >> 11) & 0x1f;
+   131→  const m = (time >> 5) & 0x3f;
+   132→  const s = (time & 0x1f) * 2;
+   133→  const d = new Date(Date.UTC(year, mon - 1, day, h, m, s));
+   134→  return isNaN(d.getTime()) ? null : d.getTime();
+   135→}
+   136→
+   137→/* ================================= ZIP ================================= */
+   138→
+   139→function parseZip(src: ByteSource): ArchiveModel {
+   140→  const b = src.bytes;
+   141→  const n = b.length;
+   142→  const warnings: string[] = [];
+   143→  const scanFrom = Math.max(0, n - 66000);
+   144→  let eocd = -1;
+   145→  for (let i = n - 22; i >= scanFrom; i--) {
+   146→    if (b[i] === 0x50 && b[i + 1] === 0x4b && b[i + 2] === 0x05 && b[i + 3] === 0x06) { eocd = i; break; }
+   147→  }
+   148→  if (eocd < 0) {
+   149→    throw new Error("ZIP: end of central directory not found — the file may be truncated or part of a multi-part set.");
+   150→  }
+   151→  let count = u16le(b, eocd + 10);
+   152→  let cdSize = u32le(b, eocd + 12);
+   153→  let cdOffset = u32le(b, eocd + 16);
+   154→  const commentLen = u16le(b, eocd + 20);
+   155→  const comment = commentLen ? latin1(b.subarray(eocd + 22, eocd + 22 + commentLen)).trim() : "";
+   156→
+   157→  // ZIP64 fallback
+   158→  if (count === 0xffff || cdSize === 0xffffffff || cdOffset === 0xffffffff) {
+   159→    for (let i = eocd - 20; i >= scanFrom; i--) {
+   160→      if (b[i] === 0x50 && b[i + 1] === 0x4b && b[i + 2] === 0x06 && b[i + 3] === 0x07) {
+   161→        const z64abs = u64le(b, i + 8);
+   162→        const z = z64abs - src.base;
+   163→        if (z >= 0 && z + 56 <= n && b[z] === 0x50 && b[z + 1] === 0x4b && b[z + 2] === 0x06 && b[z + 3] === 0x06) {
+   164→          count = u64le(b, z + 32);
+   165→          cdSize = u64le(b, z + 40);
+   166→          cdOffset = u64le(b, z + 48);
+   167→          warnings.push("ZIP64 layout (over 4 GB addressing) detected.");
+   168→        }
+   169→        break;
+   170→      }
+   171→    }
+   172→  }
+   173→
+   174→  // locate the central directory inside the loaded window
+   175→  let cd = -1;
+   176→  for (const c of [cdOffset - src.base, cdOffset]) {
+   177→    if (c >= 0 && c + 4 <= n && u32le(b, c) === 0x02014b50) { cd = c; break; }
+   178→  }
+   179→  if (cd < 0) {
+   180→    const c = eocd - cdSize;
+   181→    if (c >= 0 && c + 4 <= n && u32le(b, c) === 0x02014b50) {
+   182→      cd = c;
+   183→      warnings.push("Archive has prepended data (self-extracting / wrapped ZIP) — offsets adjusted.");
+   184→    }
+   185→  }
+   186→  if (cd < 0) throw new Error("ZIP: central directory not present inside the loaded bytes.");
+   187→  if (src.base > 0) {
+   188→    warnings.push("Directory-only mode: the file body was not loaded (over the in-memory cap) — entry previews and downloads are unavailable.");
+   189→  }
+   190→
+   191→  const entries: ArcEntry[] = [];
+   192→  let off = cd;
+   193→  let bad = 0;
+   194→  const limit = Math.min(count, 100000);
+   195→  for (let i = 0; i < limit; i++) {
+   196→    if (off + 46 > n) break;
+   197→    if (u32le(b, off) !== 0x02014b50) { bad++; break; }
+   198→    const flags = u16le(b, off + 8);
+   199→    const method = u16le(b, off + 10);
+   200→    const time = u16le(b, off + 12);
+   201→    const date = u16le(b, off + 14);
+   202→    const crc = u32le(b, off + 16);
+   203→    let packed = u32le(b, off + 20);
+   204→    let size = u32le(b, off + 24);
+   205→    const nameLen = u16le(b, off + 28);
+   206→    const extraLen = u16le(b, off + 30);
+   207→    const entryCommentLen = u16le(b, off + 32);
+   208→    let local = u32le(b, off + 42);
+   209→    const extAttr = u32le(b, off + 38);
+   210→    if (off + 46 + nameLen > n) { bad++; break; }
+   211→    const name = flags & 0x800
+   212→      ? new TextDecoder().decode(b.subarray(off + 46, off + 46 + nameLen))
+   213→      : decodeCP437(b.subarray(off + 46, off + 46 + nameLen));
+   214→
+   215→    // ZIP64 extra field
+   216→    let eo = off + 46 + nameLen;
+   217→    const eEnd = Math.min(eo + extraLen, n);
+   218→    while (eo + 4 <= eEnd) {
+   219→      const id = u16le(b, eo);
+   220→      const sz = u16le(b, eo + 2);
+   221→      if (id === 0x0001) {
+   222→        let p = eo + 4;
+   223→        if (size === 0xffffffff && p + 8 <= eEnd) { size = u64le(b, p); p += 8; }
+   224→        if (packed === 0xffffffff && p + 8 <= eEnd) { packed = u64le(b, p); p += 8; }
+   225→        if (local === 0xffffffff && p + 8 <= eEnd) { local = u64le(b, p); p += 8; }
+   226→      }
+   227→      eo += 4 + sz;
+   228→    }
+   229→
+   230→    off += 46 + nameLen + extraLen + entryCommentLen;
+   231→    if (!name) { bad++; continue; }
+   232→    const isDir = name.endsWith("/") || (extAttr & 0x10) !== 0 || ((extAttr >>> 16) & 0xf000) === 0x4000;
+   233→    const encrypted = (flags & 1) !== 0;
+   234→    entries.push({
+   235→      path: name,
+   236→      isDir,
+   237→      size,
+   238→      packed,
+   239→      method: ZIP_METHODS[method] ?? `method ${method}`,
+   240→      crc: isDir ? null : crc,
+   241→      encrypted,
+   242→      mtime: dosDateTime(time, date),
+   243→      read: isDir || encrypted ? undefined : () => readZipEntry(src, local, packed, method),
+   244→    });
+   245→  }
+   246→  if (count > limit) warnings.push(`Entry list capped at ${limit} of ${count} records.`);
+   247→  return { kind: "zip", entries, comment: comment || undefined, bad, warnings, tailOnly: src.base > 0 };
+   248→}
+   249→
+   250→function readZipEntry(src: ByteSource, local: number, packed: number, method: number): Uint8Array<ArrayBuffer> {
+   251→  const b = src.bytes;
+   252→  const off = local - src.base;
+   253→  if (off < 0 || off + 30 > b.length) {
+   254→    throw new Error("Entry data lies outside the loaded byte window (file exceeds the in-memory cap).");
+   255→  }
+   256→  if (u32le(b, off) !== 0x04034b50) throw new Error("Local header mismatch — unsupported archive layout.");
+   257→  const nameLen = u16le(b, off + 26);
+   258→  const extraLen = u16le(b, off + 28);
+   259→  const start = off + 30 + nameLen + extraLen;
+   260→  if (start + packed > b.length) throw new Error("Compressed data incomplete inside the loaded window.");
+   261→  const data = b.subarray(start, start + packed);
+   262→  if (method === 0) return data;
+   263→  if (method === 8) return inflateSync(data);
+   264→  throw new Error(`Compression method “${ZIP_METHODS[method] ?? method}” is not decodable in-browser yet.`);
+   265→}
+   266→
+   267→/* ================================= TAR ================================= */
+   268→
+   269→function parseOctal(field: Uint8Array): number {
+   270→  if (field.length && (field[0] & 0x80) !== 0) {
+   271→    // GNU base-256 extension
+   272→    let v = field[0] & 0x7f;
+   273→    for (let i = 1; i < field.length; i++) v = v * 256 + field[i];
+   274→    return v;
+   275→  }
+   276→  let s = "";
+   277→  for (let i = 0; i < field.length; i++) {
+   278→    const c = field[i];
+   279→    if (c === 0) break;
+   280→    if (c !== 0x20) s += String.fromCharCode(c);
+   281→  }
+   282→  if (!/^[0-7]*$/.test(s)) return 0;
+   283→  const v = parseInt(s, 8);
+   284→  return isNaN(v) ? 0 : v;
+   285→}
+   286→
+   287→function tarCStr(field: Uint8Array): string {
+   288→  let s = "";
+   289→  for (let i = 0; i < field.length; i++) {
+   290→    const c = field[i];
+   291→    if (c === 0) break;
+   292→    s += String.fromCharCode(c);
+   293→  }
+   294→  return s;
+   295→}
+   296→
+   297→function tarChecksumOk(h: Uint8Array): boolean {
+   298→  let sum = 0;
+   299→  for (let i = 0; i < 512; i++) sum += i >= 148 && i < 156 ? 32 : h[i];
+   300→  const stored = parseOctal(h.subarray(148, 156));
+   301→  return stored > 0 && sum === stored;
+   302→}
+   303→
+   304→function parseTar(b: Uint8Array<ArrayBuffer>): { entries: ArcEntry[]; variant: string } {
+   305→  const entries: ArcEntry[] = [];
+   306→  let off = 0;
+   307→  let longName: string | null = null;
+   308→  let paxPath: string | null = null;
+   309→  const magic = asciiAt(b, 257, 5);
+   310→  const variant = magic === "ustar" ? (b[263] === 0x00 ? "ustar (POSIX)" : b[263] === 0x20 ? "ustar (GNU)" : "ustar") : "pre-POSIX (v7)";
+   311→  const CAP = 25000;
+   312→  while (off + 512 <= b.length && entries.length < CAP) {
+   313→    const h = b.subarray(off, off + 512);
+   314→    if (h[0] === 0 && h[1] === 0 && h[2] === 0 && h[511] === 0) break; // end-of-archive zero block
+   315→    if (asciiAt(h, 257, 5) !== "ustar" && !tarChecksumOk(h)) break; // not a header
+   316→    const type = h[156];
+   317→    const size = parseOctal(h.subarray(124, 136));
+   318→    const mtime = parseOctal(h.subarray(136, 148)) * 1000;
+   319→    const dataStart = off + 512;
+   320→    const name = longName ?? paxPath ?? (() => {
+   321→      const base = tarCStr(h.subarray(0, 100));
+   322→      const prefix = magic === "ustar" ? tarCStr(h.subarray(345, 500)) : "";
+   323→      return prefix ? prefix + "/" + base : base;
+   324→    })();
+   325→    longName = null;
+   326→    paxPath = null;
+   327→
+   328→    if (type === 0x4c) { // GNU long name — payload is the name of the NEXT entry
+   329→      longName = tarCStr(b.subarray(dataStart, dataStart + Math.min(size, 4096)));
+   330→      off = dataStart + Math.ceil(size / 512) * 512;
+   331→      continue;
+   332→    }
+   333→    if (type === 0x78 || type === 0x67) { // pax extended / global header
+   334→      const text = latin1(b.subarray(dataStart, dataStart + Math.min(size, 65536)));
+   335→      const at = text.indexOf(" path=");
+   336→      if (at >= 0) {
+   337→        const rest = text.slice(at + 6);
+   338→        const nl = rest.indexOf("\n");
+   339→        paxPath = nl >= 0 ? rest.slice(0, nl) : rest;
+   340→      }
+   341→      off = dataStart + Math.ceil(size / 512) * 512;
+   342→      continue;
+   343→    }
+   344→
+   345→    const kind = type === 0 ? "0" : String.fromCharCode(type);
+   346→    const isDir = kind === "5" || (name.endsWith("/") && kind === "0");
+   347→    const special: Record<string, string> = { "1": "hard link", "2": "symlink", "3": "char device", "4": "block device", "6": "FIFO" };
+   348→    entries.push({
+   349→      path: name,
+   350→      isDir,
+   351→      size: isDir ? 0 : size,
+   352→      packed: size,
+   353→      method: isDir ? "directory" : kind === "0" || kind === "7" ? "stored" : special[kind] ?? `type ${kind}`,
+   354→      crc: null,
+   355→      encrypted: false,
+   356→      mtime: mtime || null,
+   357→      read: !isDir && (kind === "0" || kind === "7")
+   358→        ? () => b.subarray(dataStart, Math.min(dataStart + size, b.length))
+   359→        : undefined,
+   360→    });
+   361→    off = dataStart + Math.ceil(size / 512) * 512;
+   362→  }
+   363→  return { entries, variant };
+   364→}
+   365→
+   366→/* ================================= ISO ================================= */
+   367→
+   368→function isoStr(b: Uint8Array, o: number, n: number): string {
+   369→  return latin1(b.subarray(o, o + n)).replace(/[\0 ]+$/g, "");
+   370→}
+   371→
+   372→function parseIso(b: Uint8Array<ArrayBuffer>): ArchiveModel {
+   373→  let pvd = -1;
+   374→  let joliet = false;
+   375→  let off = 0x8000;
+   376→  for (let i = 0; i < 16 && off + 2048 <= b.length; i++) {
+   377→    const type = b[off];
+   378→    if (asciiAt(b, off + 1, 5) !== "CD001") break;
+   379→    if (type === 1 && pvd < 0) pvd = off;
+   380→    else if (type === 2) joliet = true;
+   381→    else if (type === 255) break;
+   382→    off += 2048;
+   383→  }
+   384→  if (pvd < 0) throw new Error("ISO9660: no primary volume descriptor found at sector 16.");
+   385→  const p = b.subarray(pvd, pvd + 2048);
+   386→  const iso: IsoMeta = {
+   387→    sysId: isoStr(b, pvd + 8, 32),
+   388→    volId: isoStr(b, pvd + 40, 32),
+   389→    volSpace: u32le(p, 80),
+   390→    blockSize: u16le(p, 128) || 2048,
+   391→    joliet,
+   392→  };
+   393→  const rootExtent = u32le(p, 158);
+   394→  const rootLen = u32le(p, 166);
+   395→  const entries: ArcEntry[] = [];
+   396→  const warnings: string[] = [];
+   397→  let depthCapped = false;
+   398→
+   399→  const walk = (extent: number, len: number, prefix: string, depth: number) => {
+   400→    if (entries.length >= 5000) return;
+   401→    const start = extent * iso.blockSize;
+   402→    if (start < 0 || start >= b.length) return;
+   403→    const end = Math.min(start + len, b.length);
+   404→    let o = start;
+   405→    while (o + 34 <= end) {
+   406→      const recLen = b[o];
+   407→      if (recLen === 0) { // records never cross sector boundaries — skip to next sector
+   408→        const next = (Math.floor(o / iso.blockSize) + 1) * iso.blockSize;
+   409→        if (next <= o) break;
+   410→        o = next;
+   411→        continue;
+   412→      }
+   413→      if (recLen < 34 || o + recLen > end) break;
+   414→      const ext = u32le(b, o + 2);
+   415→      const dlen = u32le(b, o + 10);
+   416→      const flags = b[o + 25];
+   417→      const nameLen = b[o + 32];
+   418→      const name = latin1(b.subarray(o + 33, o + 33 + nameLen));
+   419→      o += recLen;
+   420→      if (name === "\u0000" || name === "\u0001") continue; // . and ..
+   421→      const clean = name.replace(/;\d+$/, "");
+   422→      const path = prefix ? prefix + "/" + clean : clean;
+   423→      const isDir = (flags & 0x02) !== 0;
+   424→      if (isDir) {
+   425→        entries.push({
+   426→          path, isDir: true, size: 0, packed: 0, method: "directory", crc: null, encrypted: false, mtime: null,
+   427→        });
+   428→        if (depth < 2) walk(ext, dlen, path, depth + 1);
+   429→        else depthCapped = true;
+   430→      } else {
+   431→        const dataStart = ext * iso.blockSize;
+   432→        entries.push({
+   433→          path, isDir: false, size: dlen, packed: dlen, method: "ISO9660", crc: null, encrypted: false, mtime: null,
+   434→          read: dataStart >= b.length ? undefined
+   435→            : () => b.subarray(dataStart, Math.min(dataStart + dlen, b.length)),
+   436→        });
+   437→      }
+   438→    }
+   439→  };
+   440→  walk(rootExtent, rootLen, "", 0);
+   441→  if (depthCapped) warnings.push("Directory walk capped at 2 levels — deeper sub-folders are listed but not expanded.");
+   442→  if (joliet) warnings.push("Joliet (UCS-2) supplementary volume detected — showing primary ISO9660 names.");
+   443→  return { kind: "iso", entries, iso, warnings };
+   444→}
+   445→
+   446→/* ================================= GZ ================================= */
+   447→
+   448→function parseGzHeader(b: Uint8Array): GzMeta {
+   449→  if (b.length < 10) throw new Error("GZIP: header truncated.");
+   450→  const flg = b[3];
+   451→  const mtime = u32le(b, 4);
+   452→  let o = 10;
+   453→  if (flg & 4) o += 2 + u16le(b, o);
+   454→  let originalName: string | undefined;
+   455→  if (flg & 8) {
+   456→    const e = b.indexOf(0, o);
+   457→    if (e > o) originalName = latin1(b.subarray(o, e));
+   458→    o = (e < 0 ? o : e) + 1;
+   459→  }
+   460→  const flags: string[] = [];
+   461→  if (flg & 1) flags.push("FTEXT");
+   462→  if (flg & 2) flags.push("FHCRC");
+   463→  if (flg & 4) flags.push("FEXTRA");
+   464→  if (flg & 8) flags.push("FNAME");
+   465→  if (flg & 16) flags.push("FCOMMENT");
+   466→  return { inner: "", originalName, mtime: mtime ? mtime * 1000 : null, os: GZ_OS[b[9]] ?? `unknown (${b[9]})`, flags };
+   467→}
+   468→
+   469→function parseGz(src: ByteSource, fileName: string): ArchiveModel {
+   470→  const b = src.bytes;
+   471→  const gz = parseGzHeader(b);
+   472→  let inner: Uint8Array<ArrayBuffer>;
+   473→  try {
+   474→    inner = gunzipSync(b);
+   475→  } catch (e) {
+   476→    throw new Error("GZIP: decompression failed (" + (e instanceof Error ? e.message : String(e)) + "). The stream may be corrupted or multi-member.");
+   477→  }
+   478→  const warnings: string[] = [];
+   479→  if (inner.length >= 262 && asciiAt(inner, 257, 5) === "ustar") {
+   480→    const t = parseTar(inner);
+   481→    return { kind: "gz", subKind: `TAR (${t.variant})`, entries: t.entries, gz: { ...gz, inner: "TAR archive" }, warnings };
+   482→  }
+   483→  if (inner[0] === 0x50 && inner[1] === 0x4b) {
+   484→    try {
+   485→      const z = parseZip({ bytes: inner, base: 0, total: inner.length });
+   486→      return { kind: "gz", subKind: "ZIP", entries: z.entries, comment: z.comment, gz: { ...gz, inner: "ZIP archive" }, warnings };
+   487→    } catch { /* fall through to raw content */ }
+   488→  }
+   489→  if (inner.length >= 0x8006 && asciiAt(inner, 0x8001, 5) === "CD001") {
+   490→    try {
+   491→      const m = parseIso(inner);
+   492→      return { kind: "gz", subKind: "ISO", entries: m.entries, gz: { ...gz, inner: "ISO image" }, warnings: m.warnings };
+   493→    } catch { /* fall through */ }
+   494→  }
+   495→  const name = gz.originalName || fileName.replace(/\.(t?gz|gzip)$/i, "") || "content";
+   496→  const probe = inner.subarray(0, Math.min(inner.length, 2048));
+   497→  const texty = printabilityRatio(probe) > 0.9;
+   498→  if (texty) warnings.push("Inner content looks like text — preview uses UTF-8 with CP437 fallback.");
+   499→  return {
+   500→    kind: "gz",
+   501→    subKind: texty ? "text" : "binary",
+   502→    entries: [{
+   503→      path: name, isDir: false, size: inner.length, packed: b.length, method: "gzip",
+   504→      crc: null, encrypted: false, mtime: gz.mtime, read: () => inner,
+   505→    }],
+   506→    gz: { ...gz, inner: texty ? "Text content" : "Binary content" },
+   507→    warnings,
+   508→  };
+   509→}
+   510→
+   511→/* =============================== RAR / 7z =============================== */
+   512→
+   513→function parseRar(b: Uint8Array): ArchiveModel {
+   514→  const v5 = b.length > 7 && b[6] === 1;
+   515→  return {
+   516→    kind: "rar",
+   517→    entries: [],
+   518→    rar: {
+   519→      version: v5 ? "RAR 5.0+" : "RAR 4.x",
+   520→      note: v5
+   521→        ? "RAR5 uses a proprietary dictionary codec — entry listing and extraction are not available in-browser yet."
+   522→        : "RAR4 uses a proprietary compression codec — entry listing and extraction are not available in-browser yet.",
+   523→    },
+   524→    warnings: [],
+   525→  };
+   526→}
+   527→
+   528→function parse7z(b: Uint8Array): ArchiveModel {
+   529→  return {
+   530→    kind: "7z",
+   531→    entries: [],
+   532→    z7: {
+   533→      version: `${b[6]}.${b[7]}`,
+   534→      nextHeaderOffset: u64le(b, 12),
+   535→      nextHeaderSize: u64le(b, 20),
+   536→    },
+   537→    warnings: [],
+   538→  };
+   539→}
+   540→
+   541→/* ============================== dispatcher ============================== */
+   542→
+   543→function parseArchive(src: ByteSource, fileName: string): ArchiveModel {
+   544→  const b = src.bytes;
+   545→  if (b.length >= 3 && b[0] === 0x50 && b[1] === 0x4b && (b[2] === 3 || b[2] === 5 || b[2] === 7)) {
+   546→    return parseZip(src);
+   547→  }
+   548→  if (b.length >= 7 && asciiAt(b, 0, 4) === "Rar!") return parseRar(b);
+   549→  if (b.length >= 6 && asciiAt(b, 0, 2) === "7z" && b[2] === 0xbc && b[3] === 0xaf && b[4] === 0x27 && b[5] === 0x1c) {
+   550→    return parse7z(b);
+   551→  }
+   552→  if (b.length >= 0x8006 && asciiAt(b, 0x8001, 5) === "CD001") return parseIso(b);
+   553→  if (b.length >= 2 && b[0] === 0x1f && b[1] === 0x8b) return parseGz(src, fileName);
+   554→  if (b.length >= 512 && (asciiAt(b, 257, 5) === "ustar" || tarChecksumOk(b.subarray(0, 512)))) {
+   555→    const t = parseTar(b);
+   556→    return { kind: "tar", subKind: t.variant, entries: t.entries, warnings: [] };
+   557→  }
+   558→  throw new Error("Archive structure not recognized (supported listing: ZIP, TAR, GZ/TGZ, ISO 9660; detection only: RAR, 7z).");
+   559→}
+   560→
+   561→/* ============================== entry panel ============================== */
+   562→
+   563→function EntryPanel({ entry, onClose }: { entry: ArcEntry; onClose: () => void }) {
+   564→  const [data, setData] = React.useState<Uint8Array<ArrayBuffer> | null>(null);
+   565→  const [error, setError] = React.useState<string | null>(null);
+   566→  const [mode, setMode] = React.useState<"auto" | "text" | "hex">("auto");
+   567→  const [imgUrl, setImgUrl] = React.useState<string | null>(null);
+   568→  const [imgError, setImgError] = React.useState(false);
+   569→
+   570→  const ext = extOf(entry.path);
+   571→  const imageType = IMAGE_TYPES[ext];
+   572→
+   573→  React.useEffect(() => {
+   574→    let cancelled = false;
+   575→    setError(null);
+   576→    setData(null);
+   577→    setImgUrl(null);
+   578→    setImgError(false);
+   579→    setMode("auto");
+   580→    if (!entry.read) return;
+   581→    if (entry.size > PREVIEW_CAP) {
+   582→      setError(`Preview capped — the entry decompresses to ${formatBytes(entry.size)} (limit ${formatBytes(PREVIEW_CAP)}). Use Download to extract it fully.`);
+   583→      return;
+   584→    }
+   585→    try {
+   586→      const d = entry.read();
+   587→      if (!cancelled) setData(d);
+   588→    } catch (e) {
+   589→      if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+   590→    }
+   591→    return () => { cancelled = true; };
+   592→  }, [entry]);
+   593→
+   594→  React.useEffect(() => {
+   595→    if (!data || !imageType || imgError) { setImgUrl(null); return; }
+   596→    const url = URL.createObjectURL(new Blob([data.slice()], { type: imageType }));
+   597→    setImgUrl(url);
+   598→    return () => URL.revokeObjectURL(url);
+   599→  }, [data, imageType, imgError]);
+   600→
+   601→  const textPreview = React.useMemo(() => {
+   602→    if (!data) return "";
+   603→    const utf8 = isLikelyValidUtf8(data.subarray(0, Math.min(data.length, 8192)));
+   604→    const s = utf8 ? new TextDecoder().decode(data.subarray(0, Math.min(data.length, 200_000))) : decodeCP437(data.subarray(0, Math.min(data.length, 200_000)));
+   605→    return data.length > 200_000 ? s + "\n… (truncated after 200 KB)" : s;
+   606→  }, [data]);
+   607→
+   608→  const isTexty = React.useMemo(() => {
+   609→    if (!data) return false;
+   610→    if (TEXT_EXTS.has(ext)) return true;
+   611→    return printabilityRatio(data.subarray(0, 2048)) > 0.9;
+   612→  }, [data, ext]);
+   613→
+   614→  const hexLines = React.useMemo(() => {
+   615→    if (!data) return [] as string[];
+   616→    const chunk = data.subarray(0, 4096);
+   617→    const out: string[] = [];
+   618→    for (let i = 0; i < chunk.length; i += 16) out.push(hexDumpLine(chunk.subarray(i, i + 16), i));
+   619→    return out;
+   620→  }, [data]);
+   621→
+   622→  const effective: "image" | "text" | "hex" =
+   623→    mode === "auto" ? (imgUrl ? "image" : isTexty ? "text" : "hex") : mode;
+   624→
+   625→  function handleDownload() {
+   626→    try {
+   627→      if (!entry.read) throw new Error("This entry cannot be extracted.");
+   628→      const d = entry.read();
+   629→      downloadBlob(d.slice(), baseOf(entry.path) || "entry", imageType ?? "application/octet-stream");
+   630→    } catch (e) {
+   631→      setError(e instanceof Error ? e.message : String(e));
+   632→    }
+   633→  }
+   634→
+   635→  return (
+   636→    <SectionCard
+   637→      title={baseOf(entry.path) || entry.path}
+   638→      icon={<FileIcon className="h-3.5 w-3.5" />}
+   639→      right={
+   640→        <div className="flex items-center gap-1">
+   641→          <ToolButton label="Download" onClick={handleDownload} disabled={!entry.read} title="Download this entry">
+   642→            <Download className="h-3.5 w-3.5" />
+   643→          </ToolButton>
+   644→          <ToolButton onClick={onClose} title="Close preview"><X className="h-3.5 w-3.5" /></ToolButton>
+   645→        </div>
+   646→      }
+   647→      className="self-start"
+   648→    >
+   649→      <InfoGrid className="mb-3">
+   650→        <Field label="Path" mono>{entry.path}</Field>
+   651→        <Field label="Size">{formatBytes(entry.size)} ({formatNum(entry.size)} B)</Field>
+   652→        {entry.packed !== entry.size ? <Field label="Packed">{formatBytes(entry.packed)}</Field> : null}
+   653→        <Field label="Method">{entry.method}</Field>
+   654→        {entry.crc != null ? <Field label="CRC-32" mono>{entry.crc.toString(16).toUpperCase().padStart(8, "0")}</Field> : null}
+   655→        {entry.mtime ? <Field label="Modified">{formatDate(entry.mtime)}</Field> : null}
+   656→      </InfoGrid>
+   657→
+   658→      {entry.encrypted ? (
+   659→        <div className="rounded border border-amber-900/50 bg-amber-950/20 p-3 text-center text-xs text-amber-300">
+   660→          <Lock className="mx-auto mb-1 h-4 w-4" />
+   661→          Encrypted entry (general-purpose flag bit 0). Password-protected archives cannot be decrypted in this viewer.
+   662→        </div>
+   663→      ) : error ? (
+   664→        <div className="rounded border border-zinc-800 bg-zinc-900/60 p-3 text-xs text-zinc-400">{error}</div>
+   665→      ) : !data ? (
+   666→        <EmptyHint>Nothing to preview for this entry.</EmptyHint>
+   667→      ) : (
+   668→        <div className="min-w-0">
+   669→          <div className="mb-2 flex items-center justify-between gap-2">
+   670→            <Segmented
+   671→              value={mode}
+   672→              onChange={setMode}
+   673→              options={[
+   674→                { value: "auto", label: "Auto" },
+   675→                { value: "text", label: "Text" },
+   676→                { value: "hex", label: "Hex" },
+   677→              ]}
+   678→            />
+   679→            <Chip>{effective === "image" ? "image" : effective === "text" ? `${formatBytes(Math.min(data.length, 200_000))} text` : "first 4 KB"}</Chip>
+   680→          </div>
+   681→          {effective === "image" ? (
+   682→            imgUrl ? (
+   683→              <div
+   684→                className="flex max-h-[46vh] items-center justify-center overflow-auto rounded border border-zinc-800 scrollbar-thin"
+   685→                style={{
+   686→                  backgroundImage: "conic-gradient(#27272a 25%, #18181b 0 50%, #27272a 0 75%, #18181b 0)",
+   687→                  backgroundSize: "16px 16px",
+   688→                }}
+   689→              >
+   690→                { }
+   691→                <img src={imgUrl} alt={entry.path} className="max-h-[46vh] w-auto max-w-full" onError={() => setImgError(true)} />
+   692→              </div>
+   693→            ) : (
+   694→              <EmptyHint>Rendering image…</EmptyHint>
+   695→            )
+   696→          ) : null}
+   697→          {effective === "text" ? (
+   698→            <pre className="max-h-[46vh] overflow-auto whitespace-pre-wrap break-all rounded border border-zinc-800 bg-zinc-950/70 p-2 font-mono text-[11px] leading-relaxed text-zinc-300 scrollbar-thin">
+   699→              {textPreview || "(empty file)"}
+   700→            </pre>
+   701→          ) : null}
+   702→          {effective === "hex" ? (
+   703→            <div className="max-h-[46vh] overflow-auto rounded border border-zinc-800 bg-zinc-950/70 p-2 font-mono text-[10px] leading-relaxed text-zinc-400 scrollbar-thin">
+   704→              {hexLines.map((l, i) => (
+   705→                <div key={i} className="whitespace-pre">{l}</div>
+   706→              ))}
+   707→              {data.length > 4096 ? <div className="whitespace-pre text-zinc-600">… ({formatBytes(data.length)} total — first 4 KB shown)</div> : null}
+   708→            </div>
+   709→          ) : null}
+   710→          {imgError && mode === "auto" && isTexty ? (
+   711→            <div className="mt-2 text-[11px] text-zinc-500">Image could not be decoded — showing text/hex fallback.</div>
+   712→          ) : null}
+   713→        </div>
+   714→      )}
+   715→    </SectionCard>
+   716→  );
+   717→}
+   718→
+   719→/* ============================== info card ============================== */
+   720→
+   721→function ArchiveInfoCard({ model, fileName }: { model: ArchiveModel; fileName: string }) {
+   722→  const methodCounts = React.useMemo(() => {
+   723→    const m = new Map<string, number>();
+   724→    for (const e of model.entries) if (!e.isDir) m.set(e.method, (m.get(e.method) ?? 0) + 1);
+   725→    return Array.from(m.entries()).sort((a, b) => b[1] - a[1]);
+   726→  }, [model]);
+   727→
+   728→  return (
+   729→    <SectionCard title="Archive info" icon={<Info className="h-3.5 w-3.5" />} className="self-start">
+   730→      <InfoGrid>
+   731→        {model.gz ? (
+   732→          <>
+   733→            <Field label="Inner format">{model.gz.inner}{model.subKind ? ` — ${model.subKind}` : ""}</Field>
+   734→            {model.gz.originalName ? <Field label="Original name" mono>{model.gz.originalName}</Field> : null}
+   735→            <Field label="GZIP mtime">{model.gz.mtime ? formatDate(model.gz.mtime) : "—"}</Field>
+   736→            <Field label="Made on">{model.gz.os}</Field>
+   737→            {model.gz.flags.length ? <Field label="Flags">{model.gz.flags.join(", ")}</Field> : null}
+   738→          </>
+   739→        ) : null}
+   740→        {model.iso ? (
+   741→          <>
+   742→            <Field label="Volume ID" mono>{model.iso.volId || "—"}</Field>
+   743→            <Field label="System" mono>{model.iso.sysId || "—"}</Field>
+   744→            <Field label="Block size">{formatNum(model.iso.blockSize)} B</Field>
+   745→            <Field label="Volume space">{formatNum(model.iso.volSpace)} blocks ({formatBytes(model.iso.volSpace * model.iso.blockSize)})</Field>
+   746→            <Field label="Joliet">{model.iso.joliet ? "supplementary volume present" : "no"}</Field>
+   747→          </>
+   748→        ) : null}
+   749→        {model.kind === "tar" && model.subKind ? <Field label="TAR variant">{model.subKind}</Field> : null}
+   750→        <Field label="File">{fileName}</Field>
+   751→        {model.comment ? <Field label="Comment">{model.comment}</Field> : null}
+   752→      </InfoGrid>
+   753→      {methodCounts.length > 1 ? (
+   754→        <div className="mt-3 flex flex-wrap gap-1.5 border-t border-zinc-800 pt-3">
+   755→          {methodCounts.slice(0, 8).map(([m, c]) => (
+   756→            <Chip key={m}>{m} × {formatNum(c)}</Chip>
+   757→          ))}
+   758→        </div>
+   759→      ) : null}
+   760→      <p className="mt-3 border-t border-zinc-800 pt-3 text-[11px] leading-relaxed text-zinc-500">
+   761→        Click any file entry to preview and download it — everything happens locally in your browser.
+   762→      </p>
+   763→    </SectionCard>
+   764→  );
+   765→}
+   766→
+   767→/* ============================== main viewer ============================== */
+   768→
+   769→function UnsupportedCodecCard({ model }: { model: ArchiveModel }) {
+   770→  const is7z = model.kind === "7z";
+   771→  return (
+   772→    <div className="mx-auto max-w-lg space-y-4">
+   773→      <SectionCard title={is7z ? "7-Zip archive" : "RAR archive"} icon={<FileWarning className="h-3.5 w-3.5" />}>
+   774→        <InfoGrid>
+   775→          <Field label="Format">{is7z ? "7z (LZMA/LZMA2 family)" : model.rar?.version}</Field>
+   776→          <Field label="Signature" mono>{is7z ? "37 7A BC AF 27 1C" : "52 61 72 21 1A 07"}</Field>
+   777→          {is7z && model.z7 ? (
+   778→            <>
+   779→              <Field label="Version">{model.z7.version}</Field>
+   780→              <Field label="Next header" mono>offset {formatNum(model.z7.nextHeaderOffset)}, size {formatNum(model.z7.nextHeaderSize)}</Field>
+   781→            </>
+   782→          ) : null}
+   783→        </InfoGrid>
+   784→        <div className="mt-3 rounded border border-amber-900/50 bg-amber-950/20 p-3 text-xs leading-relaxed text-amber-300">
+   785→          {is7z
+   786→            ? "7z header metadata parsed, but the entry list lives in the compressed “next header” block (LZMA). In-browser extraction for this codec is not available yet."
+   787→            : model.rar?.note}
+   788→          {" "}Switch to the Hex view from the app toolbar for byte-level inspection.
+   789→        </div>
+   790→      </SectionCard>
+   791→    </div>
+   792→  );
+   793→}
+   794→
+   795→export default function ArchiveViewer({ file, arrayBuffer, head, detected, fileName }: ViewerProps) {
+   796→  const [model, setModel] = React.useState<ArchiveModel | null>(null);
+   797→  const [err, setErr] = React.useState<string | null>(null);
+   798→  const [query, setQuery] = React.useState("");
+   799→  const [visible, setVisible] = React.useState(500);
+   800→  const [selected, setSelected] = React.useState<string | null>(null);
+   801→
+   802→  React.useEffect(() => {
+   803→    let cancelled = false;
+   804→    setModel(null);
+   805→    setErr(null);
+   806→    setSelected(null);
+   807→    setVisible(500);
+   808→    (async () => {
+   809→      try {
+   810→        if (arrayBuffer) {
+   811→          const bytes = new Uint8Array(arrayBuffer) as Uint8Array<ArrayBuffer>;
+   812→          const m = parseArchive({ bytes, base: 0, total: bytes.length }, fileName);
+   813→          if (!cancelled) setModel(m);
+   814→          return;
+   815→        }
+   816→        // no full buffer — try a tail window for a ZIP directory-only listing
+   817→        if (head.length >= 3 && head[0] === 0x50 && head[1] === 0x4b && (head[2] === 3 || head[2] === 5 || head[2] === 7)) {
+   818→          const tailLen = Math.min(file.size, 6 * 1024 * 1024);
+   819→          if (tailLen < 22) throw new Error("File too small to contain a ZIP structure.");
+   820→          const tail = new Uint8Array(await file.slice(file.size - tailLen).arrayBuffer()) as Uint8Array<ArrayBuffer>;
+   821→          const m = parseArchive({ bytes: tail, base: file.size - tail.length, total: file.size }, fileName);
+   822→          if (!cancelled) setModel(m);
+   823→        } else {
+   824→          throw new Error("File exceeds the in-memory load cap (96 MB) and this archive format needs the full stream to be parsed.");
+   825→        }
+   826→      } catch (e) {
+   827→        if (!cancelled) setErr(e instanceof Error ? e.message : String(e));
+   828→      }
+   829→    })();
+   830→    return () => { cancelled = true; };
+   831→  }, [arrayBuffer, file, head, fileName]);
+   832→
+   833→  React.useEffect(() => { setVisible(500); }, [query]);
+   834→
+   835→  const stats = React.useMemo(() => {
+   836→    if (!model) return null;
+   837→    let files = 0, folders = 0, total = 0, packed = 0, enc = 0;
+   838→    for (const e of model.entries) {
+   839→      if (e.isDir) folders++; else files++;
+   840→      total += e.size;
+   841→      packed += e.packed;
+   842→      if (e.encrypted) enc++;
+   843→    }
+   844→    return { files, folders, total, packed, enc };
+   845→  }, [model]);
+   846→
+   847→  const containerChips = React.useMemo(() => {
+   848→    if (!model) return [] as { label: string; tone: "emerald" | "teal" | "amber" | "zinc" }[];
+   849→    const out: { label: string; tone: "emerald" | "teal" | "amber" | "zinc" }[] = [];
+   850→    const paths = new Set(model.entries.map((e) => e.path));
+   851→    if (paths.has("AndroidManifest.xml")) out.push({ label: "Android package", tone: "emerald" });
+   852→    else if (paths.has("META-INF/MANIFEST.MF")) out.push({ label: "Java archive", tone: "teal" });
+   853→    if (paths.has("mimetype") && paths.has("META-INF/container.xml")) out.push({ label: "EPUB / ODF container", tone: "zinc" });
+   854→    const ext = extOf(fileName);
+   855→    if (ext === "cbz" || ext === "cbr") out.push({ label: "Comic archive", tone: "zinc" });
+   856→    if (ext === "apk" && !paths.has("AndroidManifest.xml")) out.push({ label: "APK-like", tone: "amber" });
+   857→    return out;
+   858→  }, [model, fileName]);
+   859→
+   860→  const filtered = React.useMemo(() => {
+   861→    if (!model) return [] as ArcEntry[];
+   862→    const q = query.trim().toLowerCase();
+   863→    if (!q) return model.entries;
+   864→    return model.entries.filter((e) => e.path.toLowerCase().includes(q));
+   865→  }, [model, query]);
+   866→
+   867→  const selectedEntry = React.useMemo(
+   868→    () => (model && selected ? model.entries.find((e) => e.path === selected) ?? null : null),
+   869→    [model, selected],
+   870→  );
+   871→
+   872→  if (err) {
+   873→    return <ErrorCard title="Could not open archive" message={err} hint="Try the Hex viewer for raw byte inspection — the archive may use an unsupported codec." />;
+   874→  }
+   875→  if (!model) return <LoadingState label="Scanning archive structure…" />;
+   876→
+   877→  const kindLabel =
+   878→    model.kind === "zip" ? "ZIP" :
+   879→    model.kind === "tar" ? "TAR" :
+   880→    model.kind === "gz" ? `GZIP → ${model.subKind ?? ""}`.trim() :
+   881→    model.kind === "iso" ? "ISO 9660" :
+   882→    model.kind === "rar" ? "RAR" : "7z";
+   883→  const isCodecOnly = model.kind === "rar" || model.kind === "7z";
+   884→
+   885→  return (
+   886→    <div className="flex h-full min-h-0 flex-col">
+   887→      <ViewerToolbar
+   888→        left={
+   889→          <>
+   890→            <Chip tone="emerald"><Archive className="h-3 w-3" />{kindLabel}</Chip>
+   891→            {containerChips.map((c) => (
+   892→              <Chip key={c.label} tone={c.tone}>
+   893→                {c.label === "Android package" ? <Package className="h-3 w-3" /> : c.label === "Java archive" ? <Coffee className="h-3 w-3" /> : null}
+   894→                {c.label}
+   895→              </Chip>
+   896→            ))}
+   897→            {stats && !isCodecOnly ? (
+   898→              <>
+   899→                <Chip>{formatNum(stats.files)} files</Chip>
+   900→                {stats.folders ? <Chip>{formatNum(stats.folders)} folders</Chip> : null}
+   901→                <Chip>uncompressed {formatBytes(stats.total)}</Chip>
+   902→                {stats.total > 0 ? <Chip tone="teal">{Math.round((stats.packed / stats.total) * 100)}% of original</Chip> : null}
+   903→              </>
+   904→            ) : null}
+   905→            {stats?.enc ? <Chip tone="amber"><Lock className="h-3 w-3" />{stats.enc} encrypted</Chip> : null}
+   906→            {model.bad ? <Chip tone="amber">{model.bad} unreadable</Chip> : null}
+   907→          </>
+   908→        }
+   909→        center={
+   910→          !isCodecOnly ? (
+   911→            <div className="flex h-7 w-full max-w-xs items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-900 pl-2">
+   912→              <Search className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+   913→              <input
+   914→                value={query}
+   915→                onChange={(e) => setQuery(e.target.value)}
+   916→                placeholder="Filter entries…"
+   917→                className="min-w-0 flex-1 bg-transparent text-xs text-zinc-200 outline-none placeholder:text-zinc-600"
+   918→              />
+   919→              {query ? (
+   920→                <button type="button" onClick={() => setQuery("")} className="mr-1 text-zinc-500 hover:text-zinc-200" title="Clear filter">
+   921→                  <X className="h-3.5 w-3.5" />
+   922→                </button>
+   923→              ) : null}
+   924→            </div>
+   925→          ) : undefined
+   926→        }
+   927→        right={!isCodecOnly ? <Chip>{formatNum(filtered.length)} shown</Chip> : undefined}
+   928→      />
+   929→      <ViewerBody className="p-3">
+   930→        {isCodecOnly ? (
+   931→          <UnsupportedCodecCard model={model} />
+   932→        ) : (
+   933→          <div className="grid items-start gap-3 xl:grid-cols-[minmax(0,1fr)_380px]">
+   934→            <div className="order-2 min-w-0 xl:order-1">
+   935→              {filtered.length === 0 ? (
+   936→                <EmptyHint>
+   937→                  {model.entries.length ? "No entries match the filter." : "This archive contains no entries."}
+   938→                </EmptyHint>
+   939→              ) : (
+   940→                <>
+   941→                  <div className="overflow-hidden rounded-lg border border-zinc-800">
+   942→                    <table className="w-full text-left text-xs">
+   943→                      <thead className="bg-zinc-900 text-[10px] uppercase tracking-wider text-zinc-500">
+   944→                        <tr>
+   945→                          <th className="px-3 py-2 font-medium">Name</th>
+   946→                          <th className="whitespace-nowrap px-3 py-2 text-right font-medium">Size</th>
+   947→                          <th className="hidden whitespace-nowrap px-3 py-2 text-right font-medium md:table-cell">Packed</th>
+   948→                          <th className="hidden whitespace-nowrap px-3 py-2 text-right font-medium md:table-cell">Ratio</th>
+   949→                          <th className="hidden whitespace-nowrap px-3 py-2 font-medium lg:table-cell">Method</th>
+   950→                          <th className="hidden whitespace-nowrap px-3 py-2 font-medium lg:table-cell">CRC-32</th>
+   951→                        </tr>
+   952→                      </thead>
+   953→                      <tbody>
+   954→                        {filtered.slice(0, visible).map((e, idx) => {
+   955→                          const isSel = selected === e.path;
+   956→                          const ratio = e.size > 0 && e.packed !== e.size ? Math.round((e.packed / e.size) * 100) + "%" : null;
+   957→                          return (
+   958→                            <tr
+   959→                              key={e.path + ":" + e.size}
+   960→                              title={e.path}
+   961→                              onClick={() => {
+   962→                                if (e.isDir) {
+   963→                                  setQuery(e.path.endsWith("/") ? e.path : e.path + "/");
+   964→                                  setSelected(null);
+   965→                                } else {
+   966→                                  setSelected(e.path);
+   967→                                }
+   968→                              }}
+   969→                              className={cn(
+   970→                                "cursor-pointer border-t border-zinc-800/60 transition-colors hover:bg-zinc-800/50",
+   971→                                idx % 2 === 1 && !isSel && "bg-zinc-900/40",
+   972→                                isSel && "bg-emerald-900/20",
+   973→                              )}
+   974→                            >
+   975→                              <td className="max-w-0 px-3 py-1.5">
+   976→                                <div className="flex min-w-0 items-center gap-2">
+   977→                                  {e.isDir ? (
+   978→                                    <Folder className="h-3.5 w-3.5 shrink-0 text-emerald-500/80" />
+   979→                                  ) : (
+   980→                                    <FileIcon className={cn("h-3.5 w-3.5 shrink-0", e.encrypted ? "text-amber-500/80" : "text-zinc-500")} />
+   981→                                  )}
+   982→                                  <span className="truncate font-mono text-[11px]">
+   983→                                    <span className="text-zinc-600">{dirOf(e.path)}</span>
+   984→                                    <span className={cn(e.isDir ? "text-emerald-300" : "text-zinc-200")}>{baseOf(e.path) || e.path}</span>
+   985→                                  </span>
+   986→                                  {e.encrypted ? <Lock className="h-3 w-3 shrink-0 text-amber-400" /> : null}
+   987→                                </div>
+   988→                              </td>
+   989→                              <td className="whitespace-nowrap px-3 py-1.5 text-right tabular-nums text-zinc-300">
+   990→                                {e.isDir ? "—" : formatBytes(e.size)}
+   991→                              </td>
+   992→                              <td className="hidden whitespace-nowrap px-3 py-1.5 text-right tabular-nums text-zinc-400 md:table-cell">
+   993→                                {e.isDir || e.packed === e.size ? "—" : formatBytes(e.packed)}
+   994→                              </td>
+   995→                              <td className="hidden whitespace-nowrap px-3 py-1.5 text-right tabular-nums text-zinc-400 md:table-cell">
+   996→                                {ratio ?? (e.isDir ? "—" : "100%")}
+   997→                              </td>
+   998→                              <td className="hidden whitespace-nowrap px-3 py-1.5 text-zinc-500 lg:table-cell">{e.method}</td>
+   999→                              <td className="hidden whitespace-nowrap px-3 py-1.5 font-mono text-[10px] text-zinc-500 lg:table-cell">
+  1000→                                {e.crc != null ? e.crc.toString(16).toUpperCase().padStart(8, "0") : "—"}
+  1001→                              </td>
+  1002→                            </tr>
+  1003→                          );
+  1004→                        })}
+  1005→                      </tbody>
+  1006→                    </table>
+  1007→                  </div>
+  1008→                  {filtered.length > visible ? (
+  1009→                    <button
+  1010→                      type="button"
+  1011→                      onClick={() => setVisible((v) => v + 500)}
+  1012→                      className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-900/50 py-2 text-xs text-zinc-400 transition-colors hover:border-emerald-800/60 hover:text-emerald-300"
+  1013→                    >
+  1014→                      <ChevronRight className="h-3.5 w-3.5 rotate-90" />
+  1015→                      Show 500 more — {formatNum(filtered.length - visible)} hidden
+  1016→                    </button>
+  1017→                  ) : null}
+  1018→                </>
+  1019→              )}
+  1020→            </div>
+  1021→            <div className="order-1 min-w-0 xl:order-2">
+  1022→              {selectedEntry ? (
+  1023→                <EntryPanel entry={selectedEntry} onClose={() => setSelected(null)} />
+  1024→              ) : (
+  1025→                <ArchiveInfoCard model={model} fileName={fileName} />
+  1026→              )}
+  1027→            </div>
+  1028→          </div>
+  1029→        )}
+  1030→        {model.warnings.length ? (
+  1031→          <div className="mx-auto mt-4 max-w-4xl space-y-1">
+  1032→            {model.warnings.map((w, i) => (
+  1033→              <div key={i} className="flex items-start gap-2 rounded border border-amber-900/50 bg-amber-950/20 p-2 text-[11px] leading-relaxed text-amber-300/90">
+  1034→                <FileWarning className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+  1035→                {w}
+  1036→              </div>
+  1037→            ))}
+  1038→          </div>
+  1039→        ) : null}
+  1040→      </ViewerBody>
+  1041→      <div className="flex shrink-0 items-center gap-2 border-t border-zinc-800 bg-zinc-900/50 px-3 py-1.5 text-[11px] text-zinc-500">
+  1042→        <Archive className="h-3.5 w-3.5" />
+  1043→        <span className="truncate">
+  1044→          {detected.name} · {formatBytes(file.size)} · click a file to preview it inline{model.tailOnly ? " (directory-only mode)" : ""}
+  1045→        </span>
+  1046→      </div>
+  1047→    </div>
+  1048→  );
+  1049→}
+  1050→

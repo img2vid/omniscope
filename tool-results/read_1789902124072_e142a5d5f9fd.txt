@@ -1,0 +1,368 @@
+     1→     1→# OMNISCOPE — Universal Client-Side File Viewer
+     2→     2→
+     3→     3→Project: A fully client-side (GitHub Pages–ready) universal file opener/viewer supporting 10,000+ format
+     4→     4→identities (extensions ∪ MIME types ∪ binary signatures ∪ archive segments ∪ character encodings), built with
+     5→     5→Next.js 16 (App Router, single `/` route, all logic client-side, zero server APIs).
+     6→     6→
+     7→     7→Owner: main orchestrator (Z.ai Code). Subagents contribute isolated modules with Task IDs.
+     8→     8→
+     9→     9→## Architecture Map
+    10→    10→- `src/lib/types.ts` — core types (RawFormat, FormatRecord, DetectedFormat, ViewerProps, ViewerId, FormatCategory)
+    11→    11→- `src/lib/utils.ts` — general helpers (sizes, hex, entropy, hashes, strings, encodings)
+    12→    12→- `src/lib/binary.ts` — DataReader for binary parsing
+    13→    13→- `src/lib/formats/signatures.ts` — magic-byte signature engine
+    14→    14→- `src/lib/formats/database.ts` — core authored format DB (~400 records)
+    15→    15→- `src/lib/formats/extra-formats.ts` — SUBAGENT 2-a: large authored expansion (2,500+ records)
+    16→    16→- `src/lib/formats/mime-registry.ts` — SUBAGENT 2-a: IANA/vendor MIME registry (3,000+)
+    17→    17→- `src/lib/formats/families.ts` — SUBAGENT 2-a: programmatic segment families (.000–.999, .r00–.r99 …)
+    18→    18→- `src/lib/detect.ts` — detection pipeline (magic → CFB/OOXML sniff → extension → content)
+    19→    19→- `src/components/viewers/viewer-ui.tsx` — shared viewer chrome kit (toolbar, buttons, cards)
+    20→    20→- `src/components/viewers/*` — viewer components (core by orchestrator; suites by subagents 2-b/2-c/2-d)
+    21→    21→- `src/components/omniscope/*` — app shell: landing, workspace, tabs, info panel, format explorer
+    22→    22→- `src/app/page.tsx` — single route entry
+    23→    23→
+    24→    24→## Rules for subagents
+    25→    25→- Only create NEW files in their assigned paths; never edit shared files.
+    26→    26→- Viewer contract: `export default function XViewer({ file, arrayBuffer, detected, fileName }: ViewerProps)`.
+    27→    27→- All components `'use client'`, graceful error handling, dark zinc + emerald/amber palette, no blue/indigo.
+    28→    28→- Append work record at end of task using the template.
+    29→    29→
+    30→    30→---
+    31→    31→Task ID: 1
+    32→    32→Agent: orchestrator (Z.ai Code)
+    33→    33→Task: Project setup, dependency install, architecture design
+    34→    34→
+    35→    35→Work Log:
+    36→    36→- Inspected Next.js 16 scaffold (shadcn/ui full set, framer-motion, zustand, lucide available)
+    37→    37→- Installed: pdfjs-dist, mammoth, xlsx, fflate, three, opentype.js, highlight.js, marked, dompurify, exifr,
+    38→    38→  utif, ag-psd, heic2any, sql.js, dicom-parser
+    39→    39→- Copied self-contained assets: public/pdf.worker.min.mjs (pdfjs 6.3.289), public/sql-wasm.wasm
+    40→    40→
+    41→    41→Stage Summary:
+    42→    42→- Environment ready; foundation writing begins next (types, utils, detection engine, core format DB).
+    43→    43→
+    44→    44→---
+    45→    45→Task ID: 1 (continued)
+    46→    46→Agent: orchestrator (Z.ai Code)
+    47→    47→Task: Core app build — types, detection engine, format DB seed, app shell, 13 core viewers
+    48→    48→
+    49→    49→Work Log:
+    50→    50→- Wrote src/lib/types.ts (RawFormat/FormatRecord/DetectedFormat/ViewerProps/ViewerId/FileTab)
+    51→    51→- Wrote src/lib/utils.ts (hex, entropy, MD5/SHA, strings, encodings, CP437), src/lib/binary.ts (DataReader)
+    52→    52→- Wrote src/lib/formats/signatures.ts (~140 magic signatures + matcher), database.ts (~400 core records), index.ts (lookup maps), stats.ts
+    53→    53→- Wrote src/lib/detect.ts (magic → container sniff (OOXML/ODF/EPUB/CFB) → extension → content pipeline)
+    54→    54→- Wrote src/lib/media-meta.ts (custom WAV/MP3-ID3/FLAC/OGG/MP4/Matroska/AVI parsers + FFT spectrogram)
+    55→    55→- Wrote src/lib/samples.ts (16 in-browser generated sample files incl. PNG/WAV/MIDI/ZIP/NFO-CP437/torrent)
+    56→    56→- Built app shell (tabs, drag&drop, paste, keyboard shortcuts, info sidebar), landing, format explorer (virtualized)
+    57→    57→- Built 13 core viewers: text/code (virtualized, hl.js, encodings), hex (pages, search, histogram),
+    58→    58→  image (zoom/pan/filters/EXIF/palette/pixel-picker/TIFF/PSD/HEIC), audio (waveform/spectrogram/tags),
+    59→    59→  video (+metadata, frame capture), json (tree/search), xml (tree), csv (table/sort/filter/chart),
+    60→    60→  markdown (rendered+TOC), svg, ico/cur (BMP+PNG frames), fallback (forensics: entropy/bytemap/strings/hashes)
+    61→    61→- tsc clean; dev server verified via agent-browser: landing renders, PNG sample → image viewer + hashes,
+    62→    62→  WAV sample → waveform + playback controls. No console errors.
+    63→    63→
+    64→    64→Stage Summary:
+    65→    65→- Core app is LIVE and functional on / route.
+    66→    66→- Next: parallel subagents 2-a (format DB expansion to >10k identities), 2-b (office/doc viewers),
+    67→    67→  2-c (binary/system viewers), 2-d (3D/midi/chess/subtitle viewers), 2-e (map/email/medical/nfo viewers).
+    68→    68→  Integration (registry + DB merge + stats) stays with orchestrator.
+    69→    69→
+    70→    70→---
+    71→    71→Task ID: 2-e
+    72→    72→Agent: domain-viewers (general-purpose)
+    73→    73→Task: Map/email/calendar/contacts/dBase/DICOM/NFO viewer suite
+    74→    74→
+    75→    75→Work Log:
+    76→    76→- Read worklog + contracts (types.ts ViewerProps, viewer-ui.tsx kit, fallback-viewer style, utils/binary helpers)
+    77→    77→- Verified lib import shapes first: dicom-parser UMD export (namespace vs default) via node, dompurify ESM typings via scratch tsc
+    78→    78→- src/components/viewers/map-viewer.tsx — GPX (trk/trkseg/rte/wpt), KML (Placemark/LineString/Point/gx:Track, localName-based
+    79→    79→  for namespaces), TCX (Trackpoint/Position/AltitudeMeters/Time), GeoJSON (FeatureCollection/LineString/MultiLineString/Point,
+    80→    80→  recursive walk). Custom SVG route chart: equirectangular projection with cos(midLat) latitude scaling, graticule with
+    81→    81→  degree labels, per-segment emerald/teal strokes (glow underlay), START circle + END flag markers, waypoint diamonds with
+    82→    82→  toggleable halo-stroked labels; elevation area chart (cumulative haversine distance vs ele, downsampled to 3000 pts,
+    83→    83→  binary-search hover crosshair + km/m tooltip); stats card (points, distance, duration, elev min/max/gain, avg speed + pace,
+    84→    84→  bounds); toolbar: waypoint/elevation toggles, copy lat,lon list, GeoJSON export (downloadBlob)
+    85→    85→- src/components/viewers/eml-viewer.tsx — full RFC-822 MIME stack: header/body split with unfolding, quote-aware param
+    86→    86→  parsing, recursive multipart splitting on line-start boundary delimiters (CRLF/LF, -- terminator), transfer decoding
+    87→    87→  (chunked base64 via atob, hand-written quoted-printable with soft breaks + stray '='), charset decoding via TextDecoder with
+    88→    88→  utf-8/latin1 fallback guess, RFC-2047 encoded-word decoding (B/Q) for subjects and display names. Views: Body (DOMPurify-
+    89→    89→  sanitized HTML rendered via dangerouslySetInnerHTML in a white page container, <style>/form/iframe stripped; plain-text
+    90→    90→  fallback; html/plain mini-toggle), Parts (recursive MIME tree with type/charset/encoding/disposition/cid chips),
+    91→    91→  Attachments (icon rows + per-part Blob download), Source (300KB preview). MHT: multipart/related refs (cid:, Content-Location,
+    92→    92→  basename, backslash-normalized) rewritten to blob URLs in sanitized DOM, URLs revoked on cleanup. mbox: "From " line
+    93→    93→  splitting → sticky sidebar message list with subject/from/date. Address chips (quote/comma-aware splitting)
+    94→    94→- src/components/viewers/ical-viewer.tsx — ICS: line unfolding, quote-aware content-line parser (params, group prefixes),
+    95→    95→  VEVENT capture (SUMMARY/LOCATION/DESCRIPTION with \n\, \; unescape, DTSTART/DTEND date|datetime|Z|TZID, DURATION, RRULE,
+    96→    96→  STATUS, CATEGORIES, UID, VALARM counting), Intl-based TZID→UTC conversion with local fallback, month-grouped sorted event
+    97→    97→  cards with expandable descriptions and chips; stats (events/recurring/alarms/span/todos/journals/timezones). VCF: vCard
+    98→    98→  2.1/3.0/4.0 blocks (FN/N/ORG/TITLE/TEL/EMAIL/ADR/NOTE/BDAY/NICKNAME/URL, PHOTO as base64 or data: URI), contact card grid
+    99→    99→  with photo or initials avatar, typed contact rows, search box. Auto Calendar/Contacts segmented by detected.viewer, both
+   100→   100→  parsed so mixed files switch
+   101→   101→- src/components/viewers/dbf-viewer.tsx — dBase III–V/FoxPro parser: version byte map (0x02–0xF5 incl. memo variants),
+   102→   102→  last-update ymd, u32le record count, u16le header/record size, 32-byte field descriptors to 0x0D terminator, deletion-flag
+   103→   103→  records, per-type cells (C trim, N/F → number|NaN→null, D yyyymmdd→ISO, L T/F/Y/N/? , M memo pointer chip, I/@/+ int32le,
+   104→   104→  B/O/Y float64le). Table: sticky-header table, 300-row paging + Load more, sortable columns (typed comparators, nulls last),
+   105→   105→  filter box, deleted-record toggle, truncated/mismatch amber notes, stats card + field summary; CSV/JSON export buttons
+   106→   106→- src/components/viewers/dicom-viewer.tsx — dicom-parser via import-shape guard (namespace or .default, verified against the
+   107→   107→  real UMD build); tag dictionary (~70 friendly names, correct WC/WW (1050/1051) vs Rescale (1052/1053) mapping), value
+   108→   108→  decoding per VR (US/SS/UL/SL/FL/FD multiplicity, IS/DS, AT, PN with UTF-8/latin1 heuristic, OB/OW hex previews, SQ item
+   109→   109→  counts, implicit-VR garbage→hex fallback). Pixel rendering for uncompressed explicit/implicit LE: 8/16-bit grayscale with
+   110→   110→  bits-stored mask + sign extension + rescale slope/intercept, window center/width mapping with interactive sliders, auto-
+   111→   111→  window, invert toggle (MONOCHROME1 auto), multi-frame slider (≤512 frames, 4096×4096 cap); RGB planar 0/1, YBR_FULL and
+   112→   112→  YBR_FULL_422 → RGB conversion, PALETTE COLOR via 1201–1203 LUTs; compressed transfer syntaxes → amber tags-only card.
+   113→   113→  Image/Tags segmented panels, patient/study summary
+   114→   114→- src/components/viewers/nfo-viewer.tsx — decodeCP437 (auto-upgrade to UTF-8 when bytes are valid multi-byte UTF-8, toggleable),
+   115→   115→  CRT container (inner shadow + toggleable scanline overlay), horizontal-scroll non-wrapping pre, phosphor green/amber/mono
+   116→   116→  modes with glow text-shadow, font-size slider (10–22px), copy text, UTF-8 .txt download, stats (lines, longest line,
+   117→   117→  CP437 box-char count from 0xB0–0xDF/0xFE byte range)
+   118→   118→- All files: "use client", ViewerProps signature, try/catch → ErrorCard, arrayBuffer-null graceful degradation (head-only
+   119→   119→  + amber notes, or explicit ErrorCard for DICOM), zinc-950/900 + emerald/teal/amber only, lucide icons, responsive
+   120→   120→- Verification: bunx eslint (6 files) → clean after fixing conditional-hook ordering in dbf/ical and unused directive;
+   121→   121→  bunx tsc --noEmit → 0 errors in my files (remaining errors are examples/, skills/, and 2-b's mobi/pdf/rtf viewers);
+   122→   122→  bun build bundle-test of all 6 entries OK; 26-assertion logic test (QP/base64/multipart/header/address/haversine/dbf
+   123→   123→  synthetic table/ics unfold/TZID) ALL PASS; synthetic Part-10 DICOM parsed with the exact viewer access patterns (lowercase
+   124→   124→  element keys verified: x7fe00010) ALL PASS; react-dom/server smoke render of all 6 components ALL PASS
+   125→   125→
+   126→   126→Stage Summary:
+   127→   127→- 6 domain viewers delivered: map (GPX/KML/TCX/GeoJSON: SVG route chart + elevation profile + stats + GeoJSON export),
+   128→   128→  email (eml/mht/mbox: full MIME tree, QP/base64/charsets, sanitized HTML body with cid/Content-Location blob inlining,
+   129→   129→  attachment downloads, mbox browser), ical/vcf (calendar events + contact cards, search, TZID conversion), dBase (typed
+   130→   130→  table with sort/filter/paging, deleted flags, memo chips, CSV/JSON export), DICOM (tag dictionary + uncompressed pixel
+   131→   131→  rendering with interactive windowing, frames, YBR/palette/planar support), NFO (CP437/UTF-8 CRT terminal with color/size/
+   132→   132→  scanline controls)
+   133→   133→- Limitations: no external map tiles (bounds-scaled SVG only); email HTML sanitized with <style> stripped (no scoped CSS,
+   134→   134→  no iframe per spec); dBase memo (.dbt) contents not loaded (pointers shown); DICOM compressed syntaxes (JPEG/JPEG-LS/
+   135→   135→  JPEG-2000/RLE) and segmented palette LUTs are tags-only; BE transfer syntax pixel bytes read little-endian only
+   136→   136→- Integration note for orchestrator: viewers are NOT yet wired into registry.tsx (map/eml/ical/vcf→ical-viewer, dbf, dicom,
+   137→   137→  nfo ViewerIds exist in types.ts); add dynamic imports when merging
+   138→   138→
+   139→   139→---
+   140→   140→Task ID: 2-b
+   141→   141→Agent: office-doc-viewers (general-purpose)
+   142→   142→Task: Document/office viewer suite (pdf, docx, xlsx, pptx, odf, epub, mobi, rtf)
+   143→   143→
+   144→   144→Work Log:
+   145→   145→- Read worklog + contracts: types.ts (ViewerProps, ViewerId includes pdf/docx/xlsx/pptx/odf/epub/mobi/rtf),
+   146→   146→  viewer-ui.tsx kit, fallback-viewer/markdown/csv style references, utils/binary helpers, eslint/tsconfig
+   147→   147→- Verified lib import shapes first via bun: pdfjs-dist v6 namespace import exposes GlobalWorkerOptions +
+   148→   148→  getDocument (verified: 6.3.289); mammoth CJS export= with lib/index.d.ts; xlsx.mjs named exports
+   149→   149→  (read/utils); fflate zipSync/unzipSync/strFromU8 round-trip; all lucide icon names exist in 0.525
+   150→   150→- src/components/viewers/pdf-viewer.tsx (530 lines) — dynamic pdfjs import with workerSrc=/pdf.worker.min.mjs
+   151→   151→  (+ .default fallback), buffer copy to avoid detaching shared arrayBuffer, >96MB files streamed from File
+   152→   152→  object (amber "streamed" chip). Continuous-scroll virtualized rendering: every page is a fixed-size wrapper
+   153→   153→  (dims at scale 1, estimated aspect until loaded) with an IntersectionObserver (600px root margin) marking
+   154→   154→  visible pages; PageView renders its canvas at fit/zoom scale with DPR≤2, re-renders on zoom/rotate, frees the
+   155→   155→  bitmap when far off-screen, per-page error placeholder (huge page / render fail → rose card). Current page =
+   156→   156→  argmax intersection ratio (drives N/total display + prev/next scrollIntoView). Fit-width scale via
+   157→   157→  ResizeObserver on the scroll container; zoom steps 0.25–4; rotate 0/90/180/270. Thumbnails sidebar (md+):
+   158→   158→  lazy per-thumb IO rendering at 128px, capped at 120 + overflow note, click = jump + amber flash. Text search:
+   159→   159→  sequential getTextContent() scan with progress ("searching page x/y", yields every 5 pages), match list with
+   160→   160→  page chip + snippet (cap 300), click jumps and flashes the page border. Toolbar: prev/next + N/total, zoom
+   161→   161→  -/+/fit + %, rotate, pages toggle, download (downloadBlob), metadata footer (title/author from getMetadata),
+   162→   162→  PasswordException → dedicated ErrorCard
+   163→   163→- src/components/viewers/docx-viewer.tsx (299 lines) — CFB magic (D0 CF 11 E0 A1 E1 B1 1A) branch: legacy .doc
+   164→   164→  recovery (latin1 + utf16LE double decode of the OLE container, printable-run harvesting ≥4 chars with
+   165→   165→  letter-quality filter, best pass wins) → warning chip "Legacy .doc — text recovered", info card
+   166→   166→  (magic/size/format/recovery mode), copy + .txt export. OOXML branch: mammoth convertToHtml({arrayBuffer}) →
+   167→   167→  DOMPurify (blob/data/https URI regexp) → docx-body serif typography (max-w-3xl). Stats chips: words/
+   168→   168→  paragraphs/images; mammoth messages → amber warning chip + collapsible list; standalone styled HTML export;
+   169→   169→  print button. Null arrayBuffer → ErrorCard with load-cap hint
+   170→   170→- src/components/viewers/xlsx-viewer.tsx (408 lines) — SheetJS XLSX.read(type:"array", cellDates:true) for
+   171→   171→  xlsx/xls/ods; own A1-notation codec (decodeRange/colName/addr) so no sync lib import needed. Sheet tab chips
+   172→   172→  row (active emerald), 300-row batches with "load N more", 100-column cap with note. Cells rendered from
+   173→   173→  sheet[addr]: cell.w formatted text preferred, t:"d" → ISO string, booleans/errors styled, numeric right-aligned
+   174→   174→  mono; formula cells (cell.f) get an amber corner triangle. Cell click → detail panel: address/type/raw value/
+   175→   175→  formula (amber)/number format, close button. Search: scan of current sheet (2M-cell cap, 100 matches) →
+   176→   176→  address+text list, click expands rows + scrollIntoView + selection. CSV export via sheet_to_csv; stats chips:
+   177→   177→  sheets/rows×cols/formula count (memoized)
+   178→   178→- src/components/viewers/pptx-viewer.tsx (436 lines) — fflate unzipSync → ppt/slides/slideN.xml sorted
+   179→   179→  NUMERICALLY (1,2,10) + ppt/notesSlides/notesSlideN.xml. Namespace-agnostic DOMParser extraction (localName
+   180→   180→  walk, no prefix assumptions): paragraphs = a:p under txBody grouped by nearest sp/graphicFrame ancestor, text
+   181→   181→  = joined a:t runs; notes get numeric-only paragraphs (slide numbers) filtered. Slide mode: 16:9 stylized card
+   182→   182→  (title + emerald bullets + page badge, 60-line cap), speaker-notes card below; lg slide rail (number + title
+   183→   183→  snippet); Overview mode = responsive grid of mini cards → click opens. .ppt CFB → legacy recovery card +
+   184→   184→  text (shared printable-runs approach). Toolbar: prev/next + N/total, Slide/Overview segmented, export all
+   185→   185→  slides text (.txt with per-slide sections + notes)
+   186→   186→- src/components/viewers/odf-viewer.tsx (442 lines) — fflate unzipSync → content.xml + mimetype → localName
+   187→   187→  DOMParser walk: draw:page presence switches ODP/ODG page mode vs ODT text mode. Text mode: recursive
+   188→   188→  block parser (text:h outline levels → headings, text:p with text:s/tab/line-break handling, text:list,
+   189→   189→  simple tables, draw:frame → embedded image + frame text, sections/text-box recursion); images resolved from
+   190→   190→  zip hrefs (basename fallback) → blob URLs with 96MB budget, revoked on cleanup. Presentation mode: 16:9 page
+   191→   191→  cards from draw:frame blocks (presentation:class title/subtitle aware), Page/All-pages segmented + prev/next
+   192→   192→  + N/total. ods detected → routed hint card (use Sheet viewer). Stats chips (¶, images), plain-text export,
+   193→   193→  flat-XML conversion suggestion on parse failure
+   194→   194→- src/components/viewers/epub-viewer.tsx (486 lines) — custom reader (no epubjs): unzipSync → container.xml →
+   195→   195→  rootfile → OPF parse (manifest id→href/media-type/absPath resolved against OPF dir, spine order, dc
+   196→   196→  metadata). TOC titles: EPUB3 nav (properties="nav" or nav-id item) anchors first, NCX navPoint fallback
+   197→   197→  (navLabel text + content src), "Chapter n" default. Chapter render: zip entry → XHTML/XML parse (text/html
+   198→   198→  fallback for entity-laden files) → img/image src + xlink:href rewritten to blob URLs (64MB budget, remote
+   199→   199→  http/data left intact, missing images dropped) → body innerHTML → DOMPurify (blob/data regexp) → epub-body
+   200→   200→  serif reading style. Font size S/M/L, prev/next + chapter select dropdown + progress bar + %; TOC sidebar
+   201→   201→  (md+) with current highlight; anchor link interception (in-page #id scroll, cross-chapter jump, external
+   202→   202→  blocked). Blob-URL lifecycle: per-chapter-run array in a ref, revoked on switch/unmount with cancel-safe
+   203→   203→  cleanup. Spine-empty fallback: manifest HTML items; container.xml missing → *.opf search
+   204→   204→- src/components/viewers/mobi-viewer.tsx (420 lines) — PDB header (name 0x00/32B, type 0x3C "BOOK", creator
+   205→   205→  0x40 "MOBI", numRecords 0x4C, record list 0x50; alternate 0x54 layout auto-detected + validated via PalmDOC
+   206→   206→  compression sanity). Record 0: PalmDOC header (compression/textLength/textRecordCount/recordSize/encryption)
+   207→   207→  + MOBI header at +16 (type/encoding/fileVersion/fullName offset+len, extra flags at 0xF2 when header ≥0xE4).
+   208→   208→  Text records 1..N: trailing-entry trim (extra-flags bit walk + multibyte overlap) → PalmDOC LZ77 decompress
+   209→   209→  (literal runs 1–8, 0x80–0xBF backrefs dist/len, 0xC0+ space pairs) or raw copy (compression 1) into capped
+   210→   210→  24MB buffer → decode cp1252/UTF-8 → sanitize → reading style. Raw/render segmented, PDB/MOBI header info
+   211→   211→  panel (toggle), HTML export. Guards: DRM encryption → error, HUFF/CDIC (17480) → header card + unsupported
+   212→   212→  message, KF8/AZW3 (version 8) → best-effort + amber chip
+   213→   213→- src/components/viewers/rtf-viewer.tsx (437 lines) — custom RTF→HTML parser (tokenizer + group state stack):
+   214→   214→  \b \i \ul(\ulw\uldb) toggles with param 0, \plain reset, \fsN half-points → px, \cfN colors from parsed
+   215→   215→  \colortbl (\red/\green/\blue + ";" entries, auto entry 0), \qc/\ql/\qr/\qj alignment captured per-paragraph,
+   216→   216→  \par/\sect/\page new paragraphs, \line soft breaks, \tab/\cell tabs, \'hh hex escapes (cp1252 map + \ansicpgN
+   217→   217→  TextDecoder override), \uN unicode with \ucN substitute skipping (hex AND literal fallback chars), escapes
+   218→   218→  \\ \{ \} \~ nbsp, symbol words (emdash/bullet/quotes…), ignorable destinations {\*\…} + skip-list (fonttbl,
+   219→   219→  stylesheet, info, header/footer, listtable, rsidtbl, pict → "[image]" marker, fldinst, generator …), \binN
+   220→   220→  raw-byte skip, \pntext/listtext muted. Output: styled spans → paragraph divs → DOMPurify → rtf-body
+   221→   221→  typography; Rendered/Source segmented, stats chips (groups/chars/colors), standalone HTML export,
+   222→   222→  head-only fallback for >96MB RTF
+   223→   223→- Verification: bunx eslint on all 8 files → 0 errors/0 warnings (removed 4 unused disable directives);
+   224→   224→  bunx tsc --noEmit → 0 errors in my 8 files (fixed: ES2018 regex s-flag → [\s\S], Thumb ref element type,
+   225→   225→  closure-narrowed TextDecoder). Runtime smoke tests under bun: all 8 modules import cleanly (default exports
+   226→   226→  named); MOBI synthetic fixture (PDB+MOBI header+text records) parses fully incl. UTF-8 fullName + exact text
+   227→   227→  round-trip; PalmDOC LZ77 literal + backreference round-trips; trailing-entry trim (0x40 block + multibyte);
+   228→   228→  RTF fixture: 11 groups/3 colors/4 paras, align c/l/r, bold+italic+fs runs, é via \u233 and \'e9, color \cf2,
+   229→   229→  [image] marker, no fonttbl/generator leaks; xlsx A1 codec (colName AA/ZZ/AAA, decodeRange, cellText date/
+   230→   230→  formatted/bool) + formula counting; epub path resolution (../, fragments, absolute) + zip lookup fallbacks;
+   231→   231→  fflate zip round-trip with numeric slide ordering (1,2,10); pdfjs GlobalWorkerOptions verified on namespace
+   232→   232→  import. Scratch test dir removed afterwards
+   233→   233→
+   234→   234→Stage Summary:
+   235→   235→- 8 office/document viewers delivered, all default-exported matching ViewerIds in types.ts: PdfViewer
+   236→   236→  (pdf-viewer), DocxViewer (docx-viewer), XlsxViewer (xlsx-viewer), PptxViewer (pptx-viewer), OdfViewer
+   237→   237→  (odf-viewer), EpubViewer (epub-viewer), MobiViewer (mobi-viewer), RtfViewer (rtf-viewer)
+   238→   238→- Fully working: PDF raster rendering with virtualization/thumbs/search/zoom/rotate (worker from
+   239→   239→  public/pdf.worker.min.mjs); .docx→HTML via mammoth with stats/warnings/export; xlsx/xls/ods sheets with
+   240→   240→  formulas, cell inspector, search, CSV export; .pptx slide/notes text cards with overview grid; ODF
+   241→   241→  text/presentation with embedded images; EPUB reader with spine/TOC/blob images; MOBI (PalmDOC + trailing
+   242→   242→  entries, cp1252/UTF-8); RTF custom parser with colors/fonts/alignment/unicode escapes
+   243→   243→- Fallback-only: legacy .doc/.ppt CFB → printable-run text recovery (formatting lost); AZW3/KF8 → best-effort
+   244→   244→  record extraction + header card; HUFF/CDIC + DRM MOBI → info/error cards; ODS→ODF viewer shows "use Sheet
+   245→   245→  viewer" hint (routed to xlsx by orchestrator)
+   246→   246→- Key decisions: pdfjs buffer copy (protect shared arrayBuffer from detach), pdf >96MB streamed from File
+   247→   247→  object, all parsers namespace-agnostic via localName (survives prefix variants), DOMPurify URI regexp
+   248→   248→  extended with blob:/data: (image inlining), no blue/indigo anywhere (emerald/teal/amber/rose palette only)
+   249→   249→- arrayBuffer===null (>96MB cap): PDF streams from File; RTF falls back to 64KB head parse; all others show
+   250→   250→  descriptive ErrorCards with hints
+   251→   251→- Integration note for orchestrator: registry.tsx needs dynamic imports for pdf/docx/xlsx/pptx/odf/epub/
+   252→   252→  mobi/rtf ViewerIds (labels already present in VIEWER_LABELS); .doc legacy route should target docx viewer
+   253→   253→  (CFB branch), .ppt legacy → pptx viewer, .ods → xlsx viewer
+   254→   254→---
+   255→   255→Task ID: 2-c-2
+   256→   256→Agent: nbt-viewer (general-purpose)
+   257→   257→Task: Minecraft NBT viewer (completing 2-c suite)
+   258→   258→
+   259→   259→Work Log:
+   260→   260→- Read worklog + contracts (types.ts ViewerProps/ViewerId "nbt", viewer-ui kit, DataReader, utils, fallback/
+   261→   261→  json/torrent style references); verified fflate 0.8.3 installed and lucide icon names exist
+   262→   262→- Created ONLY src/components/viewers/nbt-viewer.tsx (~700 lines, "use client", default export NbtViewer):
+   263→   263→- Detection per spec: head 1F 8B → dynamic `await import("fflate")` gunzipSync on full arrayBuffer (with 512MB
+   264→   264→  decompressed guard) → parse; else head 0A 00 00 → raw big-endian NBT; else ErrorCard "Not a recognized NBT
+   265→   265→  payload". arrayBuffer null (>96MB) → dedicated ErrorCard with load-cap hint
+   266→   266→- Full big-endian NBT parser (DataReader little=false): types 0–12, names/strings via custom modified-UTF-8
+   267→   267→  decoder that ALSO accepts standard UTF-8 4-byte supplementary sequences (handles 0xC0 0x80 NUL, CESU-8
+   268→   268→  surrogate pairs, stray surrogates→U+FFFD); Longs as BigInt (BigInt64Array for arrays), IntArray Int32Array,
+   269→   269→  ByteArray signed display; explicit truncation/negative-length/unknown-type errors; recursion depth cap 64,
+   270→   270→  node cap 200k, list-length sanity guards
+   271→   271→- Tree view (flat-row model, no virtualization): chevron collapsible rows (keyboard-focusable, aria labels),
+   272→   272→  type chips colored by family (numbers amber, strings emerald, containers zinc, arrays teal, Long rose),
+   273→   273→  value previews: formatted numbers (BigInt toLocaleString + L suffix), quoted strings truncated at 200 chars
+   274→   274→  with expandable full text, arrays show [len] + first 8 values + … expandable to 64, compounds show child
+   275→   275→  count, lists show elemType × length; per-row byte offset (decompressed payload); >20k rows → render first
+   276→   276→  2,000 with amber truncated note
+   277→   277→- Toolbar: Expand all / Collapse all (forceAll flag + path Set), Copy as JSON (check feedback) / Download JSON
+   278→   278→  (conversion: Long→string, numeric arrays→first 32 numbers + "… +N more values" note, duplicate compound
+   279→   279→  keys deduped as "name #2"), search box filtering/highlighting matching tag names or string values with
+   280→   280→  auto-expansion of ancestors (match paths + expand set), hit counter
+   281→   281→- Stats panel: root name (annotated "— anonymous (modern NBT)"), root type, total tags, max depth, bytes
+   282→   282→  consumed + trailing-bytes amber note, payload card (file size vs decompressed, gzip ×ratio + % of original,
+   283→   283→  big-endian / modified UTF-8 fields), tag-type histogram mini bar chart with family colors + counts + %
+   284→   284→- Error handling: all parse/gunzip in try/catch → ErrorCard (distinct card for non-NBT payloads mentioning
+   285→   285→  .mca region files + Bedrock LE caveat); zinc-950/900 + emerald/teal/amber/rose palette only, lucide icons
+   286→   286→- Verification: bunx eslint → 0 errors/0 warnings; bunx tsc --noEmit → 0 errors in my file (remaining 4 are
+   287→   287→  examples/ + skills/, pre-existing); 38-assertion bun logic test extracted from the shipped parser code
+   288→   288→  (BigInt longs, signed bytes, CESU-8 + 4-byte UTF-8 strings, all array types, list-of-compound, dup keys,
+   289→   289→  JSON conversion truncation, trailing bytes, truncated→throw, depth-cap→throw, anonymous 0A 00 00 root,
+   290→   290→  fflate gzip round-trip + magic) ALL PASS; react-dom/server smoke render (loading state, null-buffer
+   291→   291→  ErrorCard, default export) PASS; scratch test dir removed
+   292→   292→
+   293→   293→Stage Summary:
+   294→   294→- NbtViewer delivered (src/components/viewers/nbt-viewer.tsx, default export NbtViewer): gzip/raw detection,
+   295→   295→  complete big-endian NBT tree with type chips + expandable previews, search with ancestor auto-expansion,
+   296→   296→  expand/collapse all, JSON copy/download with Long→string + array truncation, root stats with histogram and
+   297→   297→  gzip ratio, caps (depth 64 / 200k nodes / 20k→2k rows / 512MB decompressed)
+   298→   298→- Caveats: Bedrock little-endian NBT not supported (big-endian only per spec, explicit error card); .mca
+   299→   299→  region chunk wrapper not unwrapped (hinted to Hex viewer); modified-UTF-8 decoder tolerates standard UTF-8
+   300→   300→  4-byte forms; no virtualization (row caps instead)
+   301→   301→- Integration note for orchestrator: registry.tsx needs `nbt: d(() => import("./nbt-viewer"))` (label "NBT"
+   302→   302→  already in VIEWER_LABELS)
+   303→   303→
+   304→   304→---
+   305→   305→
+   306→   306→## Task ID: 2-a-1 — Agent: format-db-part-b
+   307→   307→
+   308→   308→Created `src/lib/formats/extra-formats-b.ts` exporting `EXTRA_FORMATS_B: RawFormat[]`.
+   309→   309→
+   310→   310→- **Records: 750** (≥700 required), all real file formats, one compact line each, `cat`/`viewer`/`mime`/`sig`/`sigOffset` per spec.
+   311→   311→- Coverage focus: more images (QOI, MNG/JNG, JPEG-XR, KTX/ASTC/PKM/Basis textures, DjVu, raw photos ORF/FFF/RWL/SRW/MRW/GPR/ARI, Corel/StarOffice/ODF-draw family), audio codecs & chiptune (VOC, TwinVQ, TAK, YM/SAP/SNDH/SC68, HVL, FamiTracker, VST/Kontakt presets, CRI ADX/HCA/AIX/ACB, FMOD/Wwise/XACT banks, BRSTM family), video (GXF, AAF, Braw/R3D, Bink/Smacker/THP/VQA/CDXL, NLE projects AEP/PRPROJ/VEG/DRP), fonts (METAFONT, TeX GF/PK/TFM/VF, PFR, Glyphs, FontLab), archives (ARJ, LZX, SquashFS, ASAR/AAR/GEM/IPK/PHAR, game archives MPQ/BSA/RPF/PSARC/XP3/TTARCH), disk & forensic (ADF, WOZ, 2MG, TR-DOS, EnCase E01/L01, FTK AD1), system (DS_Store, systemd journal, DTB, UF2, DEX/VDEX, registry policy, OneNote, Visio families), game ROMs & engines (A26/A52/A78/LNX/SGX/BS/MSX/SMD, 3DS CIA/CXI/3DSX, Switch NRO/NSO, Wii U RPX/RPL, Z-machine/Blorb/Glulx/TADS, PICO-8, Scratch, Unreal UE1 packages, MUGEN), scientific (ASDF, CERN ROOT, CHARMM/AMBER, LS-DYNA, VTK, SEG-Y, JCAMP-DX, FCS, microscopy CZI/LIF/LSM), ML (Arrow, PaddlePaddle, SentencePiece, UFF/ETLT, ORC, Smile), CAD/EDA (Gerber, ACIS SAT/SAB, Houdini HIP/BGEO/VDB, Modo, LDraw), GIS (MIF, ECW, world files, MVT, FlatGeobuf), many programming languages (Vala, GDScript, Haxe, Cython, GLSL/HLSL/Metal/CUDA, Eiffel, PL/I, Modula-3, ABAP, 4GL, ColdFusion, Razor), office docs (xlsb, dotx, StarOffice 5.x, XPS, Visio, OneNote), ebooks (FB2, iBooks, Apabi), email (PST/OST/DBX/EMLX), databases (MySQL MyISAM, LevelDB, Realm, DuckDB), plus embroidery, DAW scores, DVB/BD (IFO/CLPI/MPLS).
+   312→   312→- Duplicate check: official combined run → `{"records":750,"totalExts":2839,"dup":110}`. The 110 dups are **pre-existing internal CORE_FORMATS overlaps** (e.g. opus/mka/pdf/docx/ttf listed in multiple core records); baseline `core+EXTRA_FORMATS_A` alone also yields dup=110 → **my file contributes 0 new duplicate extensions** (verified: 0 collisions with core/A, 0 internal dups; iterated 3 rounds removing 61 offending exts, e.g. pcd/gbs/sfd/awb/adp/afm colliding with unseen truncated core entries).
+   313→   313→- `bunx tsc --noEmit`: 0 errors in extra-formats-b.ts (remaining 4 project errors are pre-existing in examples/ + skills/, untouched per instructions).
+   314→   314→- Note: initial core-extension listing output was truncated (>30k chars), so collisions were resolved via programmatic Set-diff instead of eyeballing.
+   315→   315→
+   316→   316→---
+   317→   317→
+   318→   318→## Task ID: 2-a-5 — Agent: mime-registry-expansion
+   319→   319→
+   320→   320→Rewrote `src/lib/formats/mime-registry-2.ts` (previous partial run had 455 unverifiable/hallucinated mimes — all removed) and created `src/lib/formats/mime-registry-all.ts` (`MIME_REGISTRY_ALL = [...MIME_REGISTRY, ...MIME_CHUNK_2]`).
+   321→   321→
+   322→   322→- **Counts**: `{"newEntries":2005,"uniqueNew":2005,"overlap":0}` (≥1,600 required). Combined registry: 3,250 records / 3,248 unique (the 2 case-exact dups — `application/mathml+xml`, `application/pdf` — are PRE-EXISTING internal duplicates inside the old `mime-registry.ts`, untouched per "fix only yours").
+   323→   323→- **Sourcing (all verified real, zero fabrication)**: entries generated programmatically from authoritative lists — (1) official IANA media-types registry XML (media-types.xml, 2,348 registered types; vendor `vnd.*` + personal `prs.*` trees, standards tree, audio/video/image/text/font/model/message/haptics trees; multipart/* and */example excluded); (2) freedesktop.org shared-mime-info `freedesktop.org.xml` (de-facto ubiquitous `application/x-*` with official comments as names); (3) Apache httpd `mime.types` (historic-registered + ubiquitous types). Old-registry exclusion done case-insensitively (stricter than required).
+   324→   324→- **Record shape**: `{ mime, name, cat, viewer }` per `MimeRecord` (desc omitted); names = fdo comments ∩ ~180-entry curated dictionary (Excel/Keynote/Lotus/SyncML/OMA/model-*/prs.* families) ∩ prettifier; cat/viewer via rule classifier matching existing registry conventions (office→docx/xlsx/pptx, +xml→xml, +json→json, +zip→archive, model/*→3d/three3d, fonts, geo→map, disks, games, network/telecom, sqlite databases, subtitles…). All 2,005 cat/viewer values validated against the `FormatCategory`/`ViewerId` unions.
+   325→   325→- **Structure note**: the 2,005-entry literal triggers TS2590 (union too complex > ~1.2k literal shapes), so the file splits records into 4 internal `PART_1..4: MimeRecord[]` (~501 each) and exports `MIME_CHUNK_2: MimeRecord[] = [...PART_1, ...PART_2, ...PART_3, ...PART_4]` — same export, same verification results.
+   326→   326→- **Verification**: task's official bun check → `{"newEntries":2005,"uniqueNew":2005,"overlap":0}`; `bunx tsc --noEmit` → 0 errors in src/lib (remaining 4 errors are pre-existing in examples/websocket + skills/, untouched).
+   327→   327→- **Integration note**: nothing imports `MIME_REGISTRY_ALL` yet; orchestrator should switch consumers (detection/lookup) from `MIME_REGISTRY` to `MIME_REGISTRY_ALL` when ready.
+   328→   328→
+   329→   329→---
+   330→   330→Task ID: 3
+   331→   331→Agent: orchestrator (Z.ai Code)
+   332→   332→Task: Integration, format knowledge base completion (10,000+ identities), full QA, launch
+   333→   333→
+   334→   334→Work Log:
+   335→   335→- Integrated all subagent viewers into registry.tsx (26 additional lazy viewers: pdf, docx, xlsx,
+   336→   336→  pptx, odf, epub, mobi, rtf, archive, exe, wasm, font, sqlite, torrent, nbt, three3d, gcode,
+   337→   337→  midi, chess, subtitle, map, eml, ical, vcf, dbf, dicom, nfo)
+   338→   338→- Grew format knowledge base through waves (subagents 2-a-1/2-a-5/2-a-9 partial + orchestrator
+   339→   339→  authored files extra-formats{,-b..-l} + mime-registry{,-2,-all} + families + conventions):
+   340→   340→  * 5,891 unique extensions (incl. programmatic families: .000-.999 split segments, RAR/PKZIP/ARJ
+   341→   341→    volumes, vim swap cascade, rotated logs, compound .tar.* / *.gz / *.d.ts conventions)
+   342→   342→  * 3,261 real MIME types (IANA standards + vendor trees + x- types)
+   343→   343→  * 635 binary magic signatures (incl. 90+ MP4 ftyp brands, Nitro/engine magics, system headers)
+   344→   344→  * 227 WHATWG charset labels
+   345→   345→  * = 10,014 total recognized format identities (all computed live from data at runtime)
+   346→   346→- Fixed detection pipeline: generic-XML magic now defers to specific XML format records
+   347→   347→  (GPX/KML/SVG/TCX route correctly), compound extension detection (tar.gz, d.ts, env.local),
+   348→   348→  CFB/OOXML container sniffing retained
+   349→   349→- Fixed JSON/CSV hook-order lint errors, image-viewer decoder chain, J/K/L dedupe issues,
+   350→   350→  eslint config to ignore vendored pdf.worker.min.mjs
+   351→   351→- QA via agent-browser: landing counter (10,014), PNG (zoom/EXIF/palette/hashes), WAV
+   352→   352→  (waveform/spectrogram/playback), ZIP archive browser, MIDI piano roll, chess PGN board with
+   353→   353→  move stepping, GPX map route chart, SRT timeline, JSON tree, Markdown render, NFO CP437,
+   354→   354→  format explorer (search, virtualized), mobile 390px responsive, sticky footer, Ctrl+K/O/Esc
+   355→   355→  shortcuts — all pass; VLM visual review: "highly polished, professional-grade interface,
+   356→   356→  no visible rendering bugs"
+   357→   357→- bun run lint: 0 errors; tsc: clean; dev server healthy
+   358→   358→
+   359→   359→Stage Summary:
+   360→   360→- OMNISCOPE is COMPLETE and live on / (port 3000): 100% client-side universal file lab.
+   361→   361→  39 viewer engines, 10,014 format identities, detection via magic bytes → container sniffing
+   362→   362→  → extension → content. Sample generator (16 formats) lets anyone try it instantly.
+   363→   363→- Known limitations: RAR/7z list extraction is identify-only (headers); WOFF2 metrics
+   364→   364→  unavailable (Brotli); DICOM compressed transfer syntaxes tags-only; legacy .doc/.ppt fall
+   365→   365→  back to text recovery. These are honest in-UI fallbacks, never crashes.
+   366→   366→- Next-phase suggestions: split-file joining (.001 merge), hex diff between two files,
+   367→   367→  NFO→PNG render, per-format export converters (CSV↔XLSX), IndexedDB recent files.
+   368→   368→

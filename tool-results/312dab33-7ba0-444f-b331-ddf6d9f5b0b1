@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="generator" content="OMNISCOPE — client-side batch forensic report">
+<title>Batch forensic report — 3 files</title>
+<style>
+  :root { --ink:#1c1917; --muted:#78716c; --line:#e7e5e4; --accent:#047857; --accent-soft:#ecfdf5; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif; color:var(--ink); background:#fafaf9; }
+  .page { max-width:920px; margin:0 auto; padding:48px 40px 64px; }
+  header.rpt { border-bottom:3px solid var(--accent); padding-bottom:18px; margin-bottom:26px; }
+  .brand { display:flex; align-items:baseline; gap:10px; }
+  .brand .t { font-size:20px; font-weight:800; letter-spacing:.14em; color:var(--accent); }
+  .brand .sub { font-size:11px; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; }
+  h1 { font-size:22px; margin:10px 0 4px; }
+  .gen { font-size:12px; color:var(--muted); }
+  section { margin:22px 0; }
+  h2 { font-size:12px; text-transform:uppercase; letter-spacing:.12em; color:var(--accent); border-bottom:1px solid var(--line); padding-bottom:6px; margin:0 0 10px; }
+  h2.fn { text-transform:none; letter-spacing:0; font-size:15px; word-break:break-all; color:var(--ink); border-bottom:1px solid var(--line); }
+  h2.fn .idx { color:var(--accent); font-weight:700; margin-right:2px; }
+  table.kv { width:100%; border-collapse:collapse; }
+  table.kv th { text-align:left; font-weight:500; color:var(--muted); width:22%; padding:5px 10px 5px 0; vertical-align:top; white-space:nowrap; }
+  table.kv td { padding:5px 0; word-break:break-all; }
+  table.kv tr { border-bottom:1px solid #f0efee; }
+  td.mono, .mono { font-family:ui-monospace,Menlo,Consolas,"Courier New",monospace; font-size:12.5px; }
+  table.manifest { width:100%; border-collapse:collapse; font-size:12.5px; }
+  table.manifest th { text-align:left; font-size:10.5px; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); border-bottom:2px solid var(--accent); padding:6px 8px; white-space:nowrap; }
+  table.manifest td { border-bottom:1px solid #eee; padding:6px 8px; vertical-align:top; }
+  table.manifest td.fname { word-break:break-all; }
+  table.manifest td.sha { color:var(--muted); }
+  .chip { display:inline-block; border:1px solid #a7f3d0; background:var(--accent-soft); color:#065f46; border-radius:99px; padding:2px 10px; font-size:11px; font-weight:600; margin:0 6px 6px 0; }
+  .statgrid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin-bottom:14px; }
+  .stat { border:1px solid var(--line); border-radius:8px; padding:10px 12px; background:#fff; }
+  .stat .n { font-size:20px; font-weight:800; color:var(--accent); font-variant-numeric:tabular-nums; }
+  .stat .l { font-size:10.5px; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); margin-top:2px; }
+  .bar { height:8px; border-radius:6px; background:#e7e5e4; overflow:hidden; border:1px solid var(--line); margin:8px 0 0; max-width:420px; }
+  .bar span { display:block; height:100%; background:linear-gradient(90deg,#059669,#d97706); }
+  .note { font-size:12px; color:var(--muted); margin:8px 0 0; }
+  .note.warn { color:#92400e; background:#fffbeb; border:1px solid #fde68a; border-radius:4px; padding:6px 8px; }
+  footer { border-top:1px solid var(--line); margin-top:30px; padding-top:14px; font-size:11px; color:var(--muted); display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+  .printbar { position:fixed; right:18px; bottom:18px; }
+  .printbar button { background:var(--accent); color:#fff; border:0; border-radius:6px; padding:9px 16px; font:600 13px/1 ui-sans-serif,system-ui,sans-serif; cursor:pointer; box-shadow:0 4px 14px rgba(4,120,87,.35); }
+  .printbar button:hover { background:#065f46; }
+  @media print {
+    body { background:#fff; }
+    .page { padding:0; max-width:none; }
+    .printbar { display:none; }
+    section { break-inside:avoid; }
+    h1 { font-size:18px; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="rpt">
+    <div class="brand"><span class="t">OMNISCOPE</span><span class="sub">batch forensic report · 10,014 format identities</span></div>
+    <h1>3 files · 539 B</h1>
+    <div class="gen">Generated 2026-09-20 15:08:30 UTC · entirely client-side · nothing was uploaded</div>
+  </header>
+
+  <section>
+    <h2>Overview</h2>
+    <div class="statgrid">
+      <div class="stat"><div class="n">3</div><div class="l">files</div></div>
+      <div class="stat"><div class="n">539 B</div><div class="l">total size</div></div>
+      <div class="stat"><div class="n">3</div><div class="l">categories</div></div>
+      <div class="stat"><div class="n">0</div><div class="l">duplicate groups</div></div>
+    </div>
+    <div><span class="chip">archive · 1</span> <span class="chip">document · 1</span> <span class="chip">image · 1</span></div>
+  </section>
+
+  <section>
+    <h2>Manifest</h2>
+    <table class="manifest">
+      <thead><tr><th>#</th><th>File</th><th>Size</th><th>Format</th><th>Category</th><th>Entropy</th><th>SHA-256</th></tr></thead>
+      <tbody>
+      <tr>
+        <td class="mono">1</td>
+        <td class="mono fname">pixel.png</td>
+        <td class="mono">74 B</td>
+        <td>Portable Network Graphics</td>
+        <td>image</td>
+        <td class="mono">4.23</td>
+        <td class="mono sha">a59821ee70622b3c…</td>
+      </tr>
+      <tr>
+        <td class="mono">2</td>
+        <td class="mono fname">sample.zip</td>
+        <td class="mono">431 B</td>
+        <td>ZIP Archive</td>
+        <td>archive</td>
+        <td class="mono">5.18</td>
+        <td class="mono sha">130684f56afc288e…</td>
+      </tr>
+      <tr>
+        <td class="mono">3</td>
+        <td class="mono fname">notes.md</td>
+        <td class="mono">34 B</td>
+        <td>Markdown</td>
+        <td>document</td>
+        <td class="mono">3.61</td>
+        <td class="mono sha">4003a8652427eeec…</td>
+      </tr>
+      </tbody>
+    </table>
+  </section>
+
+  
+
+  <section>
+    <h2>File details</h2>
+    <p class="note">Compact per-file record — full 32-byte digests above.</p>
+  </section>
+    <section class="file">
+      <h2 class="fn"><span class="idx mono">1</span> pixel.png</h2>
+      <table class="kv">
+        <tr><th>Size</th><td>74 B (74 bytes)</td></tr>
+        <tr><th>Last modified</th><td>2026-09-20 14:37:10 UTC</td></tr>
+        <tr><th>Declared MIME</th><td>image/png</td></tr>
+        <tr><th>Format</th><td class="mono">Portable Network Graphics (.png)</td></tr>
+        <tr><th>Identified by</th><td>binary signature (magic bytes)</td></tr>
+        <tr><th>Magic bytes</th><td class="mono">89 50 4E 47 0D 0A 1A 0A</td></tr>
+        <tr><th>Entropy</th><td>4.231 / 8 — medium — structured data</td></tr>
+        <tr><th>SHA-256</th><td class="mono">a59821ee70622b3c397a3ea2a7b0ab109858c3a2bbe0f653dc9ec9f61ba66ce6</td></tr>
+        <tr><th>SHA-1</th><td class="mono">de96f6c1e45a2de29cbcad926cb671e6f2c80e08</td></tr>
+        <tr><th>MD5</th><td class="mono">edd64a1e219aa8d2628099ab97c19726</td></tr>
+        <tr><th>CRC-32</th><td class="mono">26b298d1</td></tr>
+      </table>
+      <div class="bar"><span style="width:52.9%"></span></div>
+      
+    </section>
+    <section class="file">
+      <h2 class="fn"><span class="idx mono">2</span> sample.zip</h2>
+      <table class="kv">
+        <tr><th>Size</th><td>431 B (431 bytes)</td></tr>
+        <tr><th>Last modified</th><td>2026-09-20 14:37:10 UTC</td></tr>
+        <tr><th>Declared MIME</th><td>application/zip</td></tr>
+        <tr><th>Format</th><td class="mono">ZIP Archive (.zip)</td></tr>
+        <tr><th>Identified by</th><td>container sniff (CFB / OOXML zip)</td></tr>
+        <tr><th>Magic bytes</th><td class="mono">50 4B 03 04</td></tr>
+        <tr><th>Entropy</th><td>5.181 / 8 — medium — structured data</td></tr>
+        <tr><th>SHA-256</th><td class="mono">130684f56afc288ec5359ae5eaa469a9a9cf059c019514719a53732fa8421de8</td></tr>
+        <tr><th>SHA-1</th><td class="mono">3fffaea6b1fbaa12ab37a75e5aa14aad3d871abf</td></tr>
+        <tr><th>MD5</th><td class="mono">414cef6af5c4a9f22afea3e9e409333e</td></tr>
+        <tr><th>CRC-32</th><td class="mono">91ae94da</td></tr>
+      </table>
+      <div class="bar"><span style="width:64.8%"></span></div>
+      
+    </section>
+    <section class="file">
+      <h2 class="fn"><span class="idx mono">3</span> notes.md</h2>
+      <table class="kv">
+        <tr><th>Size</th><td>34 B (34 bytes)</td></tr>
+        <tr><th>Last modified</th><td>2026-09-20 14:37:10 UTC</td></tr>
+        <tr><th>Declared MIME</th><td>text/markdown</td></tr>
+        <tr><th>Format</th><td class="mono">Markdown (.md)</td></tr>
+        <tr><th>Identified by</th><td>file extension</td></tr>
+        
+        <tr><th>Entropy</th><td>3.609 / 8 — low — mostly uniform / text-like</td></tr>
+        <tr><th>SHA-256</th><td class="mono">4003a8652427eeecd71e24bc4876d05388e117f07049abae93f51d21f7e2473f</td></tr>
+        <tr><th>SHA-1</th><td class="mono">2f2ee9b41dfa1de00c6b488e9c5356d5e669a044</td></tr>
+        <tr><th>MD5</th><td class="mono">7e1700e66e9a3d7533d736e873827780</td></tr>
+        <tr><th>CRC-32</th><td class="mono">fdfa3db2</td></tr>
+      </table>
+      <div class="bar"><span style="width:45.1%"></span></div>
+      
+    </section>
+
+  <footer>
+    <span>OMNISCOPE — universal file lab · batch report of 3 files</span>
+    <span>All analysis performed in-browser; no data left this machine.</span>
+  </footer>
+</div>
+<div class="printbar"><button onclick="print()">Print report</button></div>
+</body>
+</html>

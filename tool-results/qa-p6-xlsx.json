@@ -1,0 +1,20 @@
+[
+  {
+    "name": "widget",
+    "qty": 4,
+    "price": 9.5,
+    "ok": true
+  },
+  {
+    "name": "gizmo",
+    "qty": 2,
+    "price": 19.99,
+    "ok": false
+  },
+  {
+    "name": "doohickey",
+    "qty": 7,
+    "price": 3,
+    "ok": true
+  }
+]

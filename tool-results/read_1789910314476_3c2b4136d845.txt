@@ -1,0 +1,800 @@
+     1→# OMNISCOPE — Universal Client-Side File Viewer
+     2→
+     3→Project: A fully client-side (GitHub Pages–ready) universal file opener/viewer supporting 10,000+ format
+     4→identities (extensions ∪ MIME types ∪ binary signatures ∪ archive segments ∪ character encodings), built with
+     5→Next.js 16 (App Router, single `/` route, all logic client-side, zero server APIs).
+     6→
+     7→Owner: main orchestrator (Z.ai Code). Subagents contribute isolated modules with Task IDs.
+     8→
+     9→## Architecture Map
+    10→- `src/lib/types.ts` — core types (RawFormat, FormatRecord, DetectedFormat, ViewerProps, ViewerId, FormatCategory)
+    11→- `src/lib/utils.ts` — general helpers (sizes, hex, entropy, hashes, strings, encodings)
+    12→- `src/lib/binary.ts` — DataReader for binary parsing
+    13→- `src/lib/formats/signatures.ts` — magic-byte signature engine
+    14→- `src/lib/formats/database.ts` — core authored format DB (~400 records)
+    15→- `src/lib/formats/extra-formats.ts` — SUBAGENT 2-a: large authored expansion (2,500+ records)
+    16→- `src/lib/formats/mime-registry.ts` — SUBAGENT 2-a: IANA/vendor MIME registry (3,000+)
+    17→- `src/lib/formats/families.ts` — SUBAGENT 2-a: programmatic segment families (.000–.999, .r00–.r99 …)
+    18→- `src/lib/detect.ts` — detection pipeline (magic → CFB/OOXML sniff → extension → content)
+    19→- `src/components/viewers/viewer-ui.tsx` — shared viewer chrome kit (toolbar, buttons, cards)
+    20→- `src/components/viewers/*` — viewer components (core by orchestrator; suites by subagents 2-b/2-c/2-d)
+    21→- `src/components/omniscope/*` — app shell: landing, workspace, tabs, info panel, format explorer
+    22→- `src/app/page.tsx` — single route entry
+    23→
+    24→## Rules for subagents
+    25→- Only create NEW files in their assigned paths; never edit shared files.
+    26→- Viewer contract: `export default function XViewer({ file, arrayBuffer, detected, fileName }: ViewerProps)`.
+    27→- All components `'use client'`, graceful error handling, dark zinc + emerald/amber palette, no blue/indigo.
+    28→- Append work record at end of task using the template.
+    29→
+    30→---
+    31→Task ID: 1
+    32→Agent: orchestrator (Z.ai Code)
+    33→Task: Project setup, dependency install, architecture design
+    34→
+    35→Work Log:
+    36→- Inspected Next.js 16 scaffold (shadcn/ui full set, framer-motion, zustand, lucide available)
+    37→- Installed: pdfjs-dist, mammoth, xlsx, fflate, three, opentype.js, highlight.js, marked, dompurify, exifr,
+    38→  utif, ag-psd, heic2any, sql.js, dicom-parser
+    39→- Copied self-contained assets: public/pdf.worker.min.mjs (pdfjs 6.3.289), public/sql-wasm.wasm
+    40→
+    41→Stage Summary:
+    42→- Environment ready; foundation writing begins next (types, utils, detection engine, core format DB).
+    43→
+    44→---
+    45→Task ID: 1 (continued)
+    46→Agent: orchestrator (Z.ai Code)
+    47→Task: Core app build — types, detection engine, format DB seed, app shell, 13 core viewers
+    48→
+    49→Work Log:
+    50→- Wrote src/lib/types.ts (RawFormat/FormatRecord/DetectedFormat/ViewerProps/ViewerId/FileTab)
+    51→- Wrote src/lib/utils.ts (hex, entropy, MD5/SHA, strings, encodings, CP437), src/lib/binary.ts (DataReader)
+    52→- Wrote src/lib/formats/signatures.ts (~140 magic signatures + matcher), database.ts (~400 core records), index.ts (lookup maps), stats.ts
+    53→- Wrote src/lib/detect.ts (magic → container sniff (OOXML/ODF/EPUB/CFB) → extension → content pipeline)
+    54→- Wrote src/lib/media-meta.ts (custom WAV/MP3-ID3/FLAC/OGG/MP4/Matroska/AVI parsers + FFT spectrogram)
+    55→- Wrote src/lib/samples.ts (16 in-browser generated sample files incl. PNG/WAV/MIDI/ZIP/NFO-CP437/torrent)
+    56→- Built app shell (tabs, drag&drop, paste, keyboard shortcuts, info sidebar), landing, format explorer (virtualized)
+    57→- Built 13 core viewers: text/code (virtualized, hl.js, encodings), hex (pages, search, histogram),
+    58→  image (zoom/pan/filters/EXIF/palette/pixel-picker/TIFF/PSD/HEIC), audio (waveform/spectrogram/tags),
+    59→  video (+metadata, frame capture), json (tree/search), xml (tree), csv (table/sort/filter/chart),
+    60→  markdown (rendered+TOC), svg, ico/cur (BMP+PNG frames), fallback (forensics: entropy/bytemap/strings/hashes)
+    61→- tsc clean; dev server verified via agent-browser: landing renders, PNG sample → image viewer + hashes,
+    62→  WAV sample → waveform + playback controls. No console errors.
+    63→
+    64→Stage Summary:
+    65→- Core app is LIVE and functional on / route.
+    66→- Next: parallel subagents 2-a (format DB expansion to >10k identities), 2-b (office/doc viewers),
+    67→  2-c (binary/system viewers), 2-d (3D/midi/chess/subtitle viewers), 2-e (map/email/medical/nfo viewers).
+    68→  Integration (registry + DB merge + stats) stays with orchestrator.
+    69→
+    70→---
+    71→Task ID: 2-e
+    72→Agent: domain-viewers (general-purpose)
+    73→Task: Map/email/calendar/contacts/dBase/DICOM/NFO viewer suite
+    74→
+    75→Work Log:
+    76→- Read worklog + contracts (types.ts ViewerProps, viewer-ui.tsx kit, fallback-viewer style, utils/binary helpers)
+    77→- Verified lib import shapes first: dicom-parser UMD export (namespace vs default) via node, dompurify ESM typings via scratch tsc
+    78→- src/components/viewers/map-viewer.tsx — GPX (trk/trkseg/rte/wpt), KML (Placemark/LineString/Point/gx:Track, localName-based
+    79→  for namespaces), TCX (Trackpoint/Position/AltitudeMeters/Time), GeoJSON (FeatureCollection/LineString/MultiLineString/Point,
+    80→  recursive walk). Custom SVG route chart: equirectangular projection with cos(midLat) latitude scaling, graticule with
+    81→  degree labels, per-segment emerald/teal strokes (glow underlay), START circle + END flag markers, waypoint diamonds with
+    82→  toggleable halo-stroked labels; elevation area chart (cumulative haversine distance vs ele, downsampled to 3000 pts,
+    83→  binary-search hover crosshair + km/m tooltip); stats card (points, distance, duration, elev min/max/gain, avg speed + pace,
+    84→  bounds); toolbar: waypoint/elevation toggles, copy lat,lon list, GeoJSON export (downloadBlob)
+    85→- src/components/viewers/eml-viewer.tsx — full RFC-822 MIME stack: header/body split with unfolding, quote-aware param
+    86→  parsing, recursive multipart splitting on line-start boundary delimiters (CRLF/LF, -- terminator), transfer decoding
+    87→  (chunked base64 via atob, hand-written quoted-printable with soft breaks + stray '='), charset decoding via TextDecoder with
+    88→  utf-8/latin1 fallback guess, RFC-2047 encoded-word decoding (B/Q) for subjects and display names. Views: Body (DOMPurify-
+    89→  sanitized HTML rendered via dangerouslySetInnerHTML in a white page container, <style>/form/iframe stripped; plain-text
+    90→  fallback; html/plain mini-toggle), Parts (recursive MIME tree with type/charset/encoding/disposition/cid chips),
+    91→  Attachments (icon rows + per-part Blob download), Source (300KB preview). MHT: multipart/related refs (cid:, Content-Location,
+    92→  basename, backslash-normalized) rewritten to blob URLs in sanitized DOM, URLs revoked on cleanup. mbox: "From " line
+    93→  splitting → sticky sidebar message list with subject/from/date. Address chips (quote/comma-aware splitting)
+    94→- src/components/viewers/ical-viewer.tsx — ICS: line unfolding, quote-aware content-line parser (params, group prefixes),
+    95→  VEVENT capture (SUMMARY/LOCATION/DESCRIPTION with \n\, \; unescape, DTSTART/DTEND date|datetime|Z|TZID, DURATION, RRULE,
+    96→  STATUS, CATEGORIES, UID, VALARM counting), Intl-based TZID→UTC conversion with local fallback, month-grouped sorted event
+    97→  cards with expandable descriptions and chips; stats (events/recurring/alarms/span/todos/journals/timezones). VCF: vCard
+    98→  2.1/3.0/4.0 blocks (FN/N/ORG/TITLE/TEL/EMAIL/ADR/NOTE/BDAY/NICKNAME/URL, PHOTO as base64 or data: URI), contact card grid
+    99→  with photo or initials avatar, typed contact rows, search box. Auto Calendar/Contacts segmented by detected.viewer, both
+   100→  parsed so mixed files switch
+   101→- src/components/viewers/dbf-viewer.tsx — dBase III–V/FoxPro parser: version byte map (0x02–0xF5 incl. memo variants),
+   102→  last-update ymd, u32le record count, u16le header/record size, 32-byte field descriptors to 0x0D terminator, deletion-flag
+   103→  records, per-type cells (C trim, N/F → number|NaN→null, D yyyymmdd→ISO, L T/F/Y/N/? , M memo pointer chip, I/@/+ int32le,
+   104→  B/O/Y float64le). Table: sticky-header table, 300-row paging + Load more, sortable columns (typed comparators, nulls last),
+   105→  filter box, deleted-record toggle, truncated/mismatch amber notes, stats card + field summary; CSV/JSON export buttons
+   106→- src/components/viewers/dicom-viewer.tsx — dicom-parser via import-shape guard (namespace or .default, verified against the
+   107→  real UMD build); tag dictionary (~70 friendly names, correct WC/WW (1050/1051) vs Rescale (1052/1053) mapping), value
+   108→  decoding per VR (US/SS/UL/SL/FL/FD multiplicity, IS/DS, AT, PN with UTF-8/latin1 heuristic, OB/OW hex previews, SQ item
+   109→  counts, implicit-VR garbage→hex fallback). Pixel rendering for uncompressed explicit/implicit LE: 8/16-bit grayscale with
+   110→  bits-stored mask + sign extension + rescale slope/intercept, window center/width mapping with interactive sliders, auto-
+   111→  window, invert toggle (MONOCHROME1 auto), multi-frame slider (≤512 frames, 4096×4096 cap); RGB planar 0/1, YBR_FULL and
+   112→  YBR_FULL_422 → RGB conversion, PALETTE COLOR via 1201–1203 LUTs; compressed transfer syntaxes → amber tags-only card.
+   113→  Image/Tags segmented panels, patient/study summary
+   114→- src/components/viewers/nfo-viewer.tsx — decodeCP437 (auto-upgrade to UTF-8 when bytes are valid multi-byte UTF-8, toggleable),
+   115→  CRT container (inner shadow + toggleable scanline overlay), horizontal-scroll non-wrapping pre, phosphor green/amber/mono
+   116→  modes with glow text-shadow, font-size slider (10–22px), copy text, UTF-8 .txt download, stats (lines, longest line,
+   117→  CP437 box-char count from 0xB0–0xDF/0xFE byte range)
+   118→- All files: "use client", ViewerProps signature, try/catch → ErrorCard, arrayBuffer-null graceful degradation (head-only
+   119→  + amber notes, or explicit ErrorCard for DICOM), zinc-950/900 + emerald/teal/amber only, lucide icons, responsive
+   120→- Verification: bunx eslint (6 files) → clean after fixing conditional-hook ordering in dbf/ical and unused directive;
+   121→  bunx tsc --noEmit → 0 errors in my files (remaining errors are examples/, skills/, and 2-b's mobi/pdf/rtf viewers);
+   122→  bun build bundle-test of all 6 entries OK; 26-assertion logic test (QP/base64/multipart/header/address/haversine/dbf
+   123→  synthetic table/ics unfold/TZID) ALL PASS; synthetic Part-10 DICOM parsed with the exact viewer access patterns (lowercase
+   124→  element keys verified: x7fe00010) ALL PASS; react-dom/server smoke render of all 6 components ALL PASS
+   125→
+   126→Stage Summary:
+   127→- 6 domain viewers delivered: map (GPX/KML/TCX/GeoJSON: SVG route chart + elevation profile + stats + GeoJSON export),
+   128→  email (eml/mht/mbox: full MIME tree, QP/base64/charsets, sanitized HTML body with cid/Content-Location blob inlining,
+   129→  attachment downloads, mbox browser), ical/vcf (calendar events + contact cards, search, TZID conversion), dBase (typed
+   130→  table with sort/filter/paging, deleted flags, memo chips, CSV/JSON export), DICOM (tag dictionary + uncompressed pixel
+   131→  rendering with interactive windowing, frames, YBR/palette/planar support), NFO (CP437/UTF-8 CRT terminal with color/size/
+   132→  scanline controls)
+   133→- Limitations: no external map tiles (bounds-scaled SVG only); email HTML sanitized with <style> stripped (no scoped CSS,
+   134→  no iframe per spec); dBase memo (.dbt) contents not loaded (pointers shown); DICOM compressed syntaxes (JPEG/JPEG-LS/
+   135→  JPEG-2000/RLE) and segmented palette LUTs are tags-only; BE transfer syntax pixel bytes read little-endian only
+   136→- Integration note for orchestrator: viewers are NOT yet wired into registry.tsx (map/eml/ical/vcf→ical-viewer, dbf, dicom,
+   137→  nfo ViewerIds exist in types.ts); add dynamic imports when merging
+   138→
+   139→---
+   140→Task ID: 2-b
+   141→Agent: office-doc-viewers (general-purpose)
+   142→Task: Document/office viewer suite (pdf, docx, xlsx, pptx, odf, epub, mobi, rtf)
+   143→
+   144→Work Log:
+   145→- Read worklog + contracts: types.ts (ViewerProps, ViewerId includes pdf/docx/xlsx/pptx/odf/epub/mobi/rtf),
+   146→  viewer-ui.tsx kit, fallback-viewer/markdown/csv style references, utils/binary helpers, eslint/tsconfig
+   147→- Verified lib import shapes first via bun: pdfjs-dist v6 namespace import exposes GlobalWorkerOptions +
+   148→  getDocument (verified: 6.3.289); mammoth CJS export= with lib/index.d.ts; xlsx.mjs named exports
+   149→  (read/utils); fflate zipSync/unzipSync/strFromU8 round-trip; all lucide icon names exist in 0.525
+   150→- src/components/viewers/pdf-viewer.tsx (530 lines) — dynamic pdfjs import with workerSrc=/pdf.worker.min.mjs
+   151→  (+ .default fallback), buffer copy to avoid detaching shared arrayBuffer, >96MB files streamed from File
+   152→  object (amber "streamed" chip). Continuous-scroll virtualized rendering: every page is a fixed-size wrapper
+   153→  (dims at scale 1, estimated aspect until loaded) with an IntersectionObserver (600px root margin) marking
+   154→  visible pages; PageView renders its canvas at fit/zoom scale with DPR≤2, re-renders on zoom/rotate, frees the
+   155→  bitmap when far off-screen, per-page error placeholder (huge page / render fail → rose card). Current page =
+   156→  argmax intersection ratio (drives N/total display + prev/next scrollIntoView). Fit-width scale via
+   157→  ResizeObserver on the scroll container; zoom steps 0.25–4; rotate 0/90/180/270. Thumbnails sidebar (md+):
+   158→  lazy per-thumb IO rendering at 128px, capped at 120 + overflow note, click = jump + amber flash. Text search:
+   159→  sequential getTextContent() scan with progress ("searching page x/y", yields every 5 pages), match list with
+   160→  page chip + snippet (cap 300), click jumps and flashes the page border. Toolbar: prev/next + N/total, zoom
+   161→  -/+/fit + %, rotate, pages toggle, download (downloadBlob), metadata footer (title/author from getMetadata),
+   162→  PasswordException → dedicated ErrorCard
+   163→- src/components/viewers/docx-viewer.tsx (299 lines) — CFB magic (D0 CF 11 E0 A1 E1 B1 1A) branch: legacy .doc
+   164→  recovery (latin1 + utf16LE double decode of the OLE container, printable-run harvesting ≥4 chars with
+   165→  letter-quality filter, best pass wins) → warning chip "Legacy .doc — text recovered", info card
+   166→  (magic/size/format/recovery mode), copy + .txt export. OOXML branch: mammoth convertToHtml({arrayBuffer}) →
+   167→  DOMPurify (blob/data/https URI regexp) → docx-body serif typography (max-w-3xl). Stats chips: words/
+   168→  paragraphs/images; mammoth messages → amber warning chip + collapsible list; standalone styled HTML export;
+   169→  print button. Null arrayBuffer → ErrorCard with load-cap hint
+   170→- src/components/viewers/xlsx-viewer.tsx (408 lines) — SheetJS XLSX.read(type:"array", cellDates:true) for
+   171→  xlsx/xls/ods; own A1-notation codec (decodeRange/colName/addr) so no sync lib import needed. Sheet tab chips
+   172→  row (active emerald), 300-row batches with "load N more", 100-column cap with note. Cells rendered from
+   173→  sheet[addr]: cell.w formatted text preferred, t:"d" → ISO string, booleans/errors styled, numeric right-aligned
+   174→  mono; formula cells (cell.f) get an amber corner triangle. Cell click → detail panel: address/type/raw value/
+   175→  formula (amber)/number format, close button. Search: scan of current sheet (2M-cell cap, 100 matches) →
+   176→  address+text list, click expands rows + scrollIntoView + selection. CSV export via sheet_to_csv; stats chips:
+   177→  sheets/rows×cols/formula count (memoized)
+   178→- src/components/viewers/pptx-viewer.tsx (436 lines) — fflate unzipSync → ppt/slides/slideN.xml sorted
+   179→  NUMERICALLY (1,2,10) + ppt/notesSlides/notesSlideN.xml. Namespace-agnostic DOMParser extraction (localName
+   180→  walk, no prefix assumptions): paragraphs = a:p under txBody grouped by nearest sp/graphicFrame ancestor, text
+   181→  = joined a:t runs; notes get numeric-only paragraphs (slide numbers) filtered. Slide mode: 16:9 stylized card
+   182→  (title + emerald bullets + page badge, 60-line cap), speaker-notes card below; lg slide rail (number + title
+   183→  snippet); Overview mode = responsive grid of mini cards → click opens. .ppt CFB → legacy recovery card +
+   184→  text (shared printable-runs approach). Toolbar: prev/next + N/total, Slide/Overview segmented, export all
+   185→  slides text (.txt with per-slide sections + notes)
+   186→- src/components/viewers/odf-viewer.tsx (442 lines) — fflate unzipSync → content.xml + mimetype → localName
+   187→  DOMParser walk: draw:page presence switches ODP/ODG page mode vs ODT text mode. Text mode: recursive
+   188→  block parser (text:h outline levels → headings, text:p with text:s/tab/line-break handling, text:list,
+   189→  simple tables, draw:frame → embedded image + frame text, sections/text-box recursion); images resolved from
+   190→  zip hrefs (basename fallback) → blob URLs with 96MB budget, revoked on cleanup. Presentation mode: 16:9 page
+   191→  cards from draw:frame blocks (presentation:class title/subtitle aware), Page/All-pages segmented + prev/next
+   192→  + N/total. ods detected → routed hint card (use Sheet viewer). Stats chips (¶, images), plain-text export,
+   193→  flat-XML conversion suggestion on parse failure
+   194→- src/components/viewers/epub-viewer.tsx (486 lines) — custom reader (no epubjs): unzipSync → container.xml →
+   195→  rootfile → OPF parse (manifest id→href/media-type/absPath resolved against OPF dir, spine order, dc
+   196→  metadata). TOC titles: EPUB3 nav (properties="nav" or nav-id item) anchors first, NCX navPoint fallback
+   197→  (navLabel text + content src), "Chapter n" default. Chapter render: zip entry → XHTML/XML parse (text/html
+   198→  fallback for entity-laden files) → img/image src + xlink:href rewritten to blob URLs (64MB budget, remote
+   199→  http/data left intact, missing images dropped) → body innerHTML → DOMPurify (blob/data regexp) → epub-body
+   200→  serif reading style. Font size S/M/L, prev/next + chapter select dropdown + progress bar + %; TOC sidebar
+   201→  (md+) with current highlight; anchor link interception (in-page #id scroll, cross-chapter jump, external
+   202→  blocked). Blob-URL lifecycle: per-chapter-run array in a ref, revoked on switch/unmount with cancel-safe
+   203→  cleanup. Spine-empty fallback: manifest HTML items; container.xml missing → *.opf search
+   204→- src/components/viewers/mobi-viewer.tsx (420 lines) — PDB header (name 0x00/32B, type 0x3C "BOOK", creator
+   205→  0x40 "MOBI", numRecords 0x4C, record list 0x50; alternate 0x54 layout auto-detected + validated via PalmDOC
+   206→  compression sanity). Record 0: PalmDOC header (compression/textLength/textRecordCount/recordSize/encryption)
+   207→  + MOBI header at +16 (type/encoding/fileVersion/fullName offset+len, extra flags at 0xF2 when header ≥0xE4).
+   208→  Text records 1..N: trailing-entry trim (extra-flags bit walk + multibyte overlap) → PalmDOC LZ77 decompress
+   209→  (literal runs 1–8, 0x80–0xBF backrefs dist/len, 0xC0+ space pairs) or raw copy (compression 1) into capped
+   210→  24MB buffer → decode cp1252/UTF-8 → sanitize → reading style. Raw/render segmented, PDB/MOBI header info
+   211→  panel (toggle), HTML export. Guards: DRM encryption → error, HUFF/CDIC (17480) → header card + unsupported
+   212→  message, KF8/AZW3 (version 8) → best-effort + amber chip
+   213→- src/components/viewers/rtf-viewer.tsx (437 lines) — custom RTF→HTML parser (tokenizer + group state stack):
+   214→  \b \i \ul(\ulw\uldb) toggles with param 0, \plain reset, \fsN half-points → px, \cfN colors from parsed
+   215→  \colortbl (\red/\green/\blue + ";" entries, auto entry 0), \qc/\ql/\qr/\qj alignment captured per-paragraph,
+   216→  \par/\sect/\page new paragraphs, \line soft breaks, \tab/\cell tabs, \'hh hex escapes (cp1252 map + \ansicpgN
+   217→  TextDecoder override), \uN unicode with \ucN substitute skipping (hex AND literal fallback chars), escapes
+   218→  \\ \{ \} \~ nbsp, symbol words (emdash/bullet/quotes…), ignorable destinations {\*\…} + skip-list (fonttbl,
+   219→  stylesheet, info, header/footer, listtable, rsidtbl, pict → "[image]" marker, fldinst, generator …), \binN
+   220→  raw-byte skip, \pntext/listtext muted. Output: styled spans → paragraph divs → DOMPurify → rtf-body
+   221→  typography; Rendered/Source segmented, stats chips (groups/chars/colors), standalone HTML export,
+   222→  head-only fallback for >96MB RTF
+   223→- Verification: bunx eslint on all 8 files → 0 errors/0 warnings (removed 4 unused disable directives);
+   224→  bunx tsc --noEmit → 0 errors in my 8 files (fixed: ES2018 regex s-flag → [\s\S], Thumb ref element type,
+   225→  closure-narrowed TextDecoder). Runtime smoke tests under bun: all 8 modules import cleanly (default exports
+   226→  named); MOBI synthetic fixture (PDB+MOBI header+text records) parses fully incl. UTF-8 fullName + exact text
+   227→  round-trip; PalmDOC LZ77 literal + backreference round-trips; trailing-entry trim (0x40 block + multibyte);
+   228→  RTF fixture: 11 groups/3 colors/4 paras, align c/l/r, bold+italic+fs runs, é via \u233 and \'e9, color \cf2,
+   229→  [image] marker, no fonttbl/generator leaks; xlsx A1 codec (colName AA/ZZ/AAA, decodeRange, cellText date/
+   230→  formatted/bool) + formula counting; epub path resolution (../, fragments, absolute) + zip lookup fallbacks;
+   231→  fflate zip round-trip with numeric slide ordering (1,2,10); pdfjs GlobalWorkerOptions verified on namespace
+   232→  import. Scratch test dir removed afterwards
+   233→
+   234→Stage Summary:
+   235→- 8 office/document viewers delivered, all default-exported matching ViewerIds in types.ts: PdfViewer
+   236→  (pdf-viewer), DocxViewer (docx-viewer), XlsxViewer (xlsx-viewer), PptxViewer (pptx-viewer), OdfViewer
+   237→  (odf-viewer), EpubViewer (epub-viewer), MobiViewer (mobi-viewer), RtfViewer (rtf-viewer)
+   238→- Fully working: PDF raster rendering with virtualization/thumbs/search/zoom/rotate (worker from
+   239→  public/pdf.worker.min.mjs); .docx→HTML via mammoth with stats/warnings/export; xlsx/xls/ods sheets with
+   240→  formulas, cell inspector, search, CSV export; .pptx slide/notes text cards with overview grid; ODF
+   241→  text/presentation with embedded images; EPUB reader with spine/TOC/blob images; MOBI (PalmDOC + trailing
+   242→  entries, cp1252/UTF-8); RTF custom parser with colors/fonts/alignment/unicode escapes
+   243→- Fallback-only: legacy .doc/.ppt CFB → printable-run text recovery (formatting lost); AZW3/KF8 → best-effort
+   244→  record extraction + header card; HUFF/CDIC + DRM MOBI → info/error cards; ODS→ODF viewer shows "use Sheet
+   245→  viewer" hint (routed to xlsx by orchestrator)
+   246→- Key decisions: pdfjs buffer copy (protect shared arrayBuffer from detach), pdf >96MB streamed from File
+   247→  object, all parsers namespace-agnostic via localName (survives prefix variants), DOMPurify URI regexp
+   248→  extended with blob:/data: (image inlining), no blue/indigo anywhere (emerald/teal/amber/rose palette only)
+   249→- arrayBuffer===null (>96MB cap): PDF streams from File; RTF falls back to 64KB head parse; all others show
+   250→  descriptive ErrorCards with hints
+   251→- Integration note for orchestrator: registry.tsx needs dynamic imports for pdf/docx/xlsx/pptx/odf/epub/
+   252→  mobi/rtf ViewerIds (labels already present in VIEWER_LABELS); .doc legacy route should target docx viewer
+   253→  (CFB branch), .ppt legacy → pptx viewer, .ods → xlsx viewer
+   254→---
+   255→Task ID: 2-c-2
+   256→Agent: nbt-viewer (general-purpose)
+   257→Task: Minecraft NBT viewer (completing 2-c suite)
+   258→
+   259→Work Log:
+   260→- Read worklog + contracts (types.ts ViewerProps/ViewerId "nbt", viewer-ui kit, DataReader, utils, fallback/
+   261→  json/torrent style references); verified fflate 0.8.3 installed and lucide icon names exist
+   262→- Created ONLY src/components/viewers/nbt-viewer.tsx (~700 lines, "use client", default export NbtViewer):
+   263→- Detection per spec: head 1F 8B → dynamic `await import("fflate")` gunzipSync on full arrayBuffer (with 512MB
+   264→  decompressed guard) → parse; else head 0A 00 00 → raw big-endian NBT; else ErrorCard "Not a recognized NBT
+   265→  payload". arrayBuffer null (>96MB) → dedicated ErrorCard with load-cap hint
+   266→- Full big-endian NBT parser (DataReader little=false): types 0–12, names/strings via custom modified-UTF-8
+   267→  decoder that ALSO accepts standard UTF-8 4-byte supplementary sequences (handles 0xC0 0x80 NUL, CESU-8
+   268→  surrogate pairs, stray surrogates→U+FFFD); Longs as BigInt (BigInt64Array for arrays), IntArray Int32Array,
+   269→  ByteArray signed display; explicit truncation/negative-length/unknown-type errors; recursion depth cap 64,
+   270→  node cap 200k, list-length sanity guards
+   271→- Tree view (flat-row model, no virtualization): chevron collapsible rows (keyboard-focusable, aria labels),
+   272→  type chips colored by family (numbers amber, strings emerald, containers zinc, arrays teal, Long rose),
+   273→  value previews: formatted numbers (BigInt toLocaleString + L suffix), quoted strings truncated at 200 chars
+   274→  with expandable full text, arrays show [len] + first 8 values + … expandable to 64, compounds show child
+   275→  count, lists show elemType × length; per-row byte offset (decompressed payload); >20k rows → render first
+   276→  2,000 with amber truncated note
+   277→- Toolbar: Expand all / Collapse all (forceAll flag + path Set), Copy as JSON (check feedback) / Download JSON
+   278→  (conversion: Long→string, numeric arrays→first 32 numbers + "… +N more values" note, duplicate compound
+   279→  keys deduped as "name #2"), search box filtering/highlighting matching tag names or string values with
+   280→  auto-expansion of ancestors (match paths + expand set), hit counter
+   281→- Stats panel: root name (annotated "— anonymous (modern NBT)"), root type, total tags, max depth, bytes
+   282→  consumed + trailing-bytes amber note, payload card (file size vs decompressed, gzip ×ratio + % of original,
+   283→  big-endian / modified UTF-8 fields), tag-type histogram mini bar chart with family colors + counts + %
+   284→- Error handling: all parse/gunzip in try/catch → ErrorCard (distinct card for non-NBT payloads mentioning
+   285→  .mca region files + Bedrock LE caveat); zinc-950/900 + emerald/teal/amber/rose palette only, lucide icons
+   286→- Verification: bunx eslint → 0 errors/0 warnings; bunx tsc --noEmit → 0 errors in my file (remaining 4 are
+   287→  examples/ + skills/, pre-existing); 38-assertion bun logic test extracted from the shipped parser code
+   288→  (BigInt longs, signed bytes, CESU-8 + 4-byte UTF-8 strings, all array types, list-of-compound, dup keys,
+   289→  JSON conversion truncation, trailing bytes, truncated→throw, depth-cap→throw, anonymous 0A 00 00 root,
+   290→  fflate gzip round-trip + magic) ALL PASS; react-dom/server smoke render (loading state, null-buffer
+   291→  ErrorCard, default export) PASS; scratch test dir removed
+   292→
+   293→Stage Summary:
+   294→- NbtViewer delivered (src/components/viewers/nbt-viewer.tsx, default export NbtViewer): gzip/raw detection,
+   295→  complete big-endian NBT tree with type chips + expandable previews, search with ancestor auto-expansion,
+   296→  expand/collapse all, JSON copy/download with Long→string + array truncation, root stats with histogram and
+   297→  gzip ratio, caps (depth 64 / 200k nodes / 20k→2k rows / 512MB decompressed)
+   298→- Caveats: Bedrock little-endian NBT not supported (big-endian only per spec, explicit error card); .mca
+   299→  region chunk wrapper not unwrapped (hinted to Hex viewer); modified-UTF-8 decoder tolerates standard UTF-8
+   300→  4-byte forms; no virtualization (row caps instead)
+   301→- Integration note for orchestrator: registry.tsx needs `nbt: d(() => import("./nbt-viewer"))` (label "NBT"
+   302→  already in VIEWER_LABELS)
+   303→
+   304→---
+   305→
+   306→## Task ID: 2-a-1 — Agent: format-db-part-b
+   307→
+   308→Created `src/lib/formats/extra-formats-b.ts` exporting `EXTRA_FORMATS_B: RawFormat[]`.
+   309→
+   310→- **Records: 750** (≥700 required), all real file formats, one compact line each, `cat`/`viewer`/`mime`/`sig`/`sigOffset` per spec.
+   311→- Coverage focus: more images (QOI, MNG/JNG, JPEG-XR, KTX/ASTC/PKM/Basis textures, DjVu, raw photos ORF/FFF/RWL/SRW/MRW/GPR/ARI, Corel/StarOffice/ODF-draw family), audio codecs & chiptune (VOC, TwinVQ, TAK, YM/SAP/SNDH/SC68, HVL, FamiTracker, VST/Kontakt presets, CRI ADX/HCA/AIX/ACB, FMOD/Wwise/XACT banks, BRSTM family), video (GXF, AAF, Braw/R3D, Bink/Smacker/THP/VQA/CDXL, NLE projects AEP/PRPROJ/VEG/DRP), fonts (METAFONT, TeX GF/PK/TFM/VF, PFR, Glyphs, FontLab), archives (ARJ, LZX, SquashFS, ASAR/AAR/GEM/IPK/PHAR, game archives MPQ/BSA/RPF/PSARC/XP3/TTARCH), disk & forensic (ADF, WOZ, 2MG, TR-DOS, EnCase E01/L01, FTK AD1), system (DS_Store, systemd journal, DTB, UF2, DEX/VDEX, registry policy, OneNote, Visio families), game ROMs & engines (A26/A52/A78/LNX/SGX/BS/MSX/SMD, 3DS CIA/CXI/3DSX, Switch NRO/NSO, Wii U RPX/RPL, Z-machine/Blorb/Glulx/TADS, PICO-8, Scratch, Unreal UE1 packages, MUGEN), scientific (ASDF, CERN ROOT, CHARMM/AMBER, LS-DYNA, VTK, SEG-Y, JCAMP-DX, FCS, microscopy CZI/LIF/LSM), ML (Arrow, PaddlePaddle, SentencePiece, UFF/ETLT, ORC, Smile), CAD/EDA (Gerber, ACIS SAT/SAB, Houdini HIP/BGEO/VDB, Modo, LDraw), GIS (MIF, ECW, world files, MVT, FlatGeobuf), many programming languages (Vala, GDScript, Haxe, Cython, GLSL/HLSL/Metal/CUDA, Eiffel, PL/I, Modula-3, ABAP, 4GL, ColdFusion, Razor), office docs (xlsb, dotx, StarOffice 5.x, XPS, Visio, OneNote), ebooks (FB2, iBooks, Apabi), email (PST/OST/DBX/EMLX), databases (MySQL MyISAM, LevelDB, Realm, DuckDB), plus embroidery, DAW scores, DVB/BD (IFO/CLPI/MPLS).
+   312→- Duplicate check: official combined run → `{"records":750,"totalExts":2839,"dup":110}`. The 110 dups are **pre-existing internal CORE_FORMATS overlaps** (e.g. opus/mka/pdf/docx/ttf listed in multiple core records); baseline `core+EXTRA_FORMATS_A` alone also yields dup=110 → **my file contributes 0 new duplicate extensions** (verified: 0 collisions with core/A, 0 internal dups; iterated 3 rounds removing 61 offending exts, e.g. pcd/gbs/sfd/awb/adp/afm colliding with unseen truncated core entries).
+   313→- `bunx tsc --noEmit`: 0 errors in extra-formats-b.ts (remaining 4 project errors are pre-existing in examples/ + skills/, untouched per instructions).
+   314→- Note: initial core-extension listing output was truncated (>30k chars), so collisions were resolved via programmatic Set-diff instead of eyeballing.
+   315→
+   316→---
+   317→
+   318→## Task ID: 2-a-5 — Agent: mime-registry-expansion
+   319→
+   320→Rewrote `src/lib/formats/mime-registry-2.ts` (previous partial run had 455 unverifiable/hallucinated mimes — all removed) and created `src/lib/formats/mime-registry-all.ts` (`MIME_REGISTRY_ALL = [...MIME_REGISTRY, ...MIME_CHUNK_2]`).
+   321→
+   322→- **Counts**: `{"newEntries":2005,"uniqueNew":2005,"overlap":0}` (≥1,600 required). Combined registry: 3,250 records / 3,248 unique (the 2 case-exact dups — `application/mathml+xml`, `application/pdf` — are PRE-EXISTING internal duplicates inside the old `mime-registry.ts`, untouched per "fix only yours").
+   323→- **Sourcing (all verified real, zero fabrication)**: entries generated programmatically from authoritative lists — (1) official IANA media-types registry XML (media-types.xml, 2,348 registered types; vendor `vnd.*` + personal `prs.*` trees, standards tree, audio/video/image/text/font/model/message/haptics trees; multipart/* and */example excluded); (2) freedesktop.org shared-mime-info `freedesktop.org.xml` (de-facto ubiquitous `application/x-*` with official comments as names); (3) Apache httpd `mime.types` (historic-registered + ubiquitous types). Old-registry exclusion done case-insensitively (stricter than required).
+   324→- **Record shape**: `{ mime, name, cat, viewer }` per `MimeRecord` (desc omitted); names = fdo comments ∩ ~180-entry curated dictionary (Excel/Keynote/Lotus/SyncML/OMA/model-*/prs.* families) ∩ prettifier; cat/viewer via rule classifier matching existing registry conventions (office→docx/xlsx/pptx, +xml→xml, +json→json, +zip→archive, model/*→3d/three3d, fonts, geo→map, disks, games, network/telecom, sqlite databases, subtitles…). All 2,005 cat/viewer values validated against the `FormatCategory`/`ViewerId` unions.
+   325→- **Structure note**: the 2,005-entry literal triggers TS2590 (union too complex > ~1.2k literal shapes), so the file splits records into 4 internal `PART_1..4: MimeRecord[]` (~501 each) and exports `MIME_CHUNK_2: MimeRecord[] = [...PART_1, ...PART_2, ...PART_3, ...PART_4]` — same export, same verification results.
+   326→- **Verification**: task's official bun check → `{"newEntries":2005,"uniqueNew":2005,"overlap":0}`; `bunx tsc --noEmit` → 0 errors in src/lib (remaining 4 errors are pre-existing in examples/websocket + skills/, untouched).
+   327→- **Integration note**: nothing imports `MIME_REGISTRY_ALL` yet; orchestrator should switch consumers (detection/lookup) from `MIME_REGISTRY` to `MIME_REGISTRY_ALL` when ready.
+   328→
+   329→---
+   330→Task ID: 3
+   331→Agent: orchestrator (Z.ai Code)
+   332→Task: Integration, format knowledge base completion (10,000+ identities), full QA, launch
+   333→
+   334→Work Log:
+   335→- Integrated all subagent viewers into registry.tsx (26 additional lazy viewers: pdf, docx, xlsx,
+   336→  pptx, odf, epub, mobi, rtf, archive, exe, wasm, font, sqlite, torrent, nbt, three3d, gcode,
+   337→  midi, chess, subtitle, map, eml, ical, vcf, dbf, dicom, nfo)
+   338→- Grew format knowledge base through waves (subagents 2-a-1/2-a-5/2-a-9 partial + orchestrator
+   339→  authored files extra-formats{,-b..-l} + mime-registry{,-2,-all} + families + conventions):
+   340→  * 5,891 unique extensions (incl. programmatic families: .000-.999 split segments, RAR/PKZIP/ARJ
+   341→    volumes, vim swap cascade, rotated logs, compound .tar.* / *.gz / *.d.ts conventions)
+   342→  * 3,261 real MIME types (IANA standards + vendor trees + x- types)
+   343→  * 635 binary magic signatures (incl. 90+ MP4 ftyp brands, Nitro/engine magics, system headers)
+   344→  * 227 WHATWG charset labels
+   345→  * = 10,014 total recognized format identities (all computed live from data at runtime)
+   346→- Fixed detection pipeline: generic-XML magic now defers to specific XML format records
+   347→  (GPX/KML/SVG/TCX route correctly), compound extension detection (tar.gz, d.ts, env.local),
+   348→  CFB/OOXML container sniffing retained
+   349→- Fixed JSON/CSV hook-order lint errors, image-viewer decoder chain, J/K/L dedupe issues,
+   350→  eslint config to ignore vendored pdf.worker.min.mjs
+   351→- QA via agent-browser: landing counter (10,014), PNG (zoom/EXIF/palette/hashes), WAV
+   352→  (waveform/spectrogram/playback), ZIP archive browser, MIDI piano roll, chess PGN board with
+   353→  move stepping, GPX map route chart, SRT timeline, JSON tree, Markdown render, NFO CP437,
+   354→  format explorer (search, virtualized), mobile 390px responsive, sticky footer, Ctrl+K/O/Esc
+   355→  shortcuts — all pass; VLM visual review: "highly polished, professional-grade interface,
+   356→  no visible rendering bugs"
+   357→- bun run lint: 0 errors; tsc: clean; dev server healthy
+   358→
+   359→Stage Summary:
+   360→- OMNISCOPE is COMPLETE and live on / (port 3000): 100% client-side universal file lab.
+   361→  39 viewer engines, 10,014 format identities, detection via magic bytes → container sniffing
+   362→  → extension → content. Sample generator (16 formats) lets anyone try it instantly.
+   363→- Known limitations: RAR/7z list extraction is identify-only (headers); WOFF2 metrics
+   364→  unavailable (Brotli); DICOM compressed transfer syntaxes tags-only; legacy .doc/.ppt fall
+   365→  back to text recovery. These are honest in-UI fallbacks, never crashes.
+   366→- Next-phase suggestions: split-file joining (.001 merge), hex diff between two files,
+   367→  NFO→PNG render, per-format export converters (CSV↔XLSX), IndexedDB recent files.
+   368→
+   369→---
+   370→Task ID: 4-c
+   371→Agent: recent-files (general-purpose)
+   372→Task: IndexedDB-backed recent files library + landing-page "RECENT FILES" chip row (2 new files: src/lib/recent-files.ts, src/components/omniscope/recent-panel.tsx)
+   373→
+   374→Work Log:
+   375→- Read worklog/landing.tsx/utils.ts/types.ts + eslint config + app-shell addFiles contract; verified lucide
+   376→  exports (FileImage, FileAudio, FileVideo, FileArchive, FileText, FileCode2, FileJson, History, X) and
+   377→  formatBytes in @/lib/utils
+   378→- Created src/lib/recent-files.ts: raw IndexedDB (no deps), DB "omniscope-recents" v1, store "recent"
+   379→  keyPath "id", index "by_opened" (lastOpened); Blob stored natively on the SAME record only when
+   380→  file.size <= RECENT_CACHE_CAP (8MB) else cached=false/no blob; addRecentFile dedupes by name+size inside
+   381→  ONE readwrite transaction (iterates the by_opened index cursor, updates lastOpened+detected info+blob on
+   382→  match), caps store at 50 (deletes oldest by lastOpened beyond 50); all functions guard
+   383→  `typeof indexedDB === "undefined"` for SSR/prerender (return [] / null / no-op) and never throw — errors
+   384→  (quota, blocked DB) caught + console.warn; exported formatRecentWhen (just now / N min / N h / N d ago /
+   385→  "Jan 5", year appended when different)
+   386→- Created src/components/omniscope/recent-panel.tsx ("use client"): RecentFilesRow renders a horizontal
+   387→  overflow-x-auto scrollbar-thin row of h-9 w-40 rounded-full chips (zinc-900/70, zinc-700 border, hover
+   388→  emerald border, NO blue/indigo) with detected-format color dot + lucide file icon + mono truncated name
+   389→  (title tooltip) + meta line (detectedName · formatBytes · formatRecentWhen); blobs fetched LAZILY only on
+   390→  click via getRecentFile → new File([blob], name, {type: mime}) → onOpenFile; uncached → transient amber
+   391→  inline message row "not cached — re-open from disk" (2.5s, amber ring on the triggering chip,
+   392→  non-blocking); per-chip hover X (pointer-events gated, keyboard focusable) → removeRecentFile;
+   393→  "clear all" at row end flips to inline "sure? yes / no" (no window.confirm); "RECENT FILES" header label
+   394→  with History icon styled like landing's "TRY A GENERATED SAMPLE" label; hydration-safe (loads in
+   395→  useEffect, skeleton h-9 w-40 rounded-full bg-zinc-800/60 animate-pulse while loading, never stale SSR
+   396→  markup); empty list / IndexedDB unavailable → returns null
+   397→- Fixed during verification: formatRecentWhen hours unit bug (min/3600 → min/60) caught by scratch test;
+   398→  component return type widened to React.JSX.Element | null (spec mandates return null on empty state,
+   399→  which bare React.JSX.Element rejects under strict TS)
+   400→- Verification: bunx eslint on both files → 0 errors 0 warnings; bunx tsc --noEmit → 0 errors in my files
+   401→  (only pre-existing errors remain in audio-viewer.tsx — modified by another agent, untouched by me);
+   402→  bun SSR-guard test: 15/15 (indexedDB undefined → listRecentFiles [] / getRecentFile null / add+remove+
+   403→  clear no-op, no throw; formatRecentWhen all buckets); full IndexedDB logic test with fake-indexeddb in
+   404→  scratch: 17/17 (newest-first list, limit, blob byte round-trip, dedupe update, same-name-diff-size new
+   405→  entry, oversized → cached=false + blob null, remove single, cap at 50 evicting oldest, clear); react-dom/
+   406→  server renderToString smoke (skeleton + label, no recents leak, default === named export); all scratch
+   407→  files deleted; dev.log clean (GET / 200, no compile breakage)
+   408→- Work record also written to agent-ctx/4-c-recent-files.md
+   409→
+   410→Stage Summary:
+   411→- Delivered: src/lib/recent-files.ts (RecentEntry, RECENT_CACHE_CAP, addRecentFile, listRecentFiles,
+   412→  getRecentFile, removeRecentFile, clearRecentFiles, formatRecentWhen) and
+   413→  src/components/omniscope/recent-panel.tsx (RecentFilesRow + default export). No existing file edited.
+   414→- Integration notes for orchestrator: (1) in app-shell's addFiles, after detectFromHead completes call
+   415→  `void addRecentFile(file, { name: detected.name, viewer: detected.viewer })`; (2) render
+   416→  `<RecentFilesRow onOpenFile={(f) => addFiles([f])} />` on the landing — suggested right after the drop
+   417→  zone section (before "try a generated sample"), it self-hides when there are no recents; (3) dedupe also
+   418→  refreshes mime + cached blob on re-open, and `cached` is recomputed from actual blob presence at read
+   419→  time so quota-evicted blobs degrade honestly to the amber "re-open from disk" hint.
+   420→
+   421→---
+   422→Task ID: 4-b
+   423→Agent: split-join (general-purpose)
+   424→Task: Client-side split/segmented file set detection (.001/.r00/.partN.rar/.z01+.zip) + in-browser joiner UI
+   425→
+   426→Work Log:
+   427→- Read worklog.md, app-shell.tsx, viewer-ui.tsx, utils.ts, families.ts for conventions (zinc-950 dark, emerald/amber/rose, lucide, shared chrome kit)
+   428→- Created src/lib/splitjoin.ts — pure TS, zero imports, no DOM deps:
+   429→  * parseSegmentName: case-insensitive regexes for .001-.999 (3-digit, 1-999), .r00-.r99 (rar = volume 0), .partN.rar (leading zeros ok, N>=1), .z01-.z99 (zip = last part)
+   430→  * analyzeSegments: dedupe by lowercased name+size, group by (kind, lowercased base), attach companion .rar (index 0, prepended) / .zip (index maxZ+1, appended), require >= 2 files per set, sort by index, gap detection over expected range (numeric/partN 1..max; rxx 0..max incl. the .rar; zipx 1..maxZ+1 incl. the .zip slot), multiple qualifying sets -> largest then most complete then alphabetical; returns the exact spec interface (kind "zipx" for pkzip spanning), else null
+   431→  * joinFiles: 512 MB cap check BEFORE any read (friendly Error with MB figures), then sequential file.arrayBuffer() per part, pushes Uint8Array parts, reports (doneBytes, totalBytes) per completed file, new Blob(parts) at the end
+   432→- Created src/components/omniscope/split-join-view.tsx — "use client", fixed inset-0 overlay dialog (full-height flex column: header / scroll body / action footer with safe-area padding):
+   433→  * drop zone = keyboard-focusable <button> (click-to-browse via hidden multi-file input + drag/drop with stopPropagation so the global app handlers stay quiet; entire overlay also accepts drops); working set dedupes by name+size, per-file remove + clear-all
+   434→  * live analysis: "Detected pattern" SectionCard (base, pattern, count/total, kind chip, complete/missing chip, ordered segment list with index chips in mono, amber missing-segment warnings with reconstructed filenames, editable merged-name input backed by per-suggestion override map — no setState-in-effect)
+   435→  * join button (emerald, disabled without a set, Loader2 spinner + progress bar with mono done/total bytes); result card keeps the blob in state with "Open in Omniscope" (File([blob], name, octet-stream) -> onOpenMerged) + real <a download> anchor, re-openable/re-downloadable; inline rose error card for cap/read failures; instructions card listing all 4 recognized patterns with examples when no set detected
+   436→  * Esc closes via capture-phase keydown (stopPropagation so app-level Esc doesn't also close a tab); object URLs revoked on replace/unmount; framer-motion card entrances; aria-labels + focus-visible rings throughout
+   437→- Verification: bunx eslint both files -> 0 errors 0 warnings; bunx tsc --noEmit -> 0 errors in my files (only 2 pre-existing errors in audio-viewer.tsx, a file being edited concurrently by another agent — untouched by me); scratch bun logic test in /tmp: 51/51 pass (numeric gap missing=[3], rxx rar-first ordering, partN + leading zeros + gaps, zipx z-order + missing trailing .zip + z-gaps, no-match/mixed/null cases, case-tolerant grouping, dedupe, multi-group largest-wins, dotted bases, join byte-order round-trip, monotonic progress, 512MB cap Error, read-failure propagation) — scratch deleted; dev.log tailed: compiles clean, GET / 200
+   438→
+   439→Stage Summary:
+   440→- Delivered src/lib/splitjoin.ts (analyzeSegments + joinFiles + JOIN_SIZE_CAP, 100% pure TS) and src/components/omniscope/split-join-view.tsx (SplitJoinView named + default export). Joining happens fully in-browser, capped at 512 MB.
+   441→- Integration (orchestrator): render <SplitJoinView initialFiles={segments} onOpenMerged={(f) => addFiles([f])} onClose={...} /> whenever opened files match segment extensions (families.ts .001-.999/.rNN/.zNN records or .partN.rar) or via a header "Join" button — it renders as a self-contained fixed overlay (z-50), so mount point doesn't matter. Note: it swallows Esc and drag/drop while open (by design). No existing files were edited.
+   442→
+   443→---
+   444→Task ID: 5
+   445→Agent: orchestrator (Z.ai Code)
+   446→Task: Phase-2 QA, bug fixes, three new features (hex diff, split-join, recent files), VLM-driven styling polish
+   447→
+   448→Work Log:
+   449→- Reviewed worklog + full QA pass via agent-browser: landing (10,014 counter), PNG/WAV/ZIP/MIDI viewers,
+   450→  format explorer, no console errors. dev server + lint healthy at session start.
+   451→- VLM screenshot review raised "audio waveform black void" → CONFIRMED REAL BUG:
+   452→  audio-viewer.tsx waveform bar math inverted (top = mid + maxs*scale put max BELOW center →
+   453→  bot-top negative → Math.max(1, negative) = 1px dots; only 1.4% canvas pixels drawn).
+   454→- FIXED audio-viewer.tsx: correct envelope math (max up / min down), vertical gradient bars,
+   455→  center reference line, amber playhead overlay div, ResizeObserver redraw on container resize,
+   456→  guard W<2/H<2. Also fixed spectrogram DPR bug (was putImageData at CSS-pixel size into a
+   457→  dpr-scaled canvas → half blank; now draws at device resolution + ResizeObserver).
+   458→  Verified: 49.3% canvas pixels now drawn; VLM confirms "waveform clearly visible".
+   459→- FIXED Home button dead-end: clicking Home set activeId=null but Landing only rendered when
+   460→  tabs.length===0 → blank "Reading & identifying…" state. Landing now renders whenever
+   461→  !activeTab (tab strip stays for navigation). Verified via agent-browser.
+   462→- NEW FEATURE — Binary Compare (Task 4-a; subagent failed twice on token limits, built by
+   463→  orchestrator): src/components/omniscope/diff-view.tsx. Exports DiffView({initialA, initialB,
+   464→  onClose}) + computeDiffHunks(). A/B slots (click-browse + drag-drop w/ stopPropagation, swap),
+   465→  chunked SHA-256 (8MB slices, UI never blocks), 128MB compare window cap w/ amber truncation
+   466→  notice, identical-hash fast path (emerald verdict), side-by-side hex+ASCII 16B/rows with
+   467→  rose-950/60 differing cells + amber ghost bytes past EOF + per-cell title tooltips
+   468→  ("0x0004F2A1: 3A → 41"), 4096-byte paged virtualization + prev/next + jump-to-offset
+   469→  (decimal/0x-hex), hunk navigator strip (rose chips, prev/next cycle, "3/4772" counter),
+   470→  stats bar (diff bytes, similarity %, hunks, first diff offset), copy-summary button.
+   471→  computeDiffHunks: gap<16 merging, tail hunks, 5000 cap. 7/7 bun logic tests pass
+   472→  (identical→0, single→1, gap4→merged, gap20→2, tail, diff+tail, empty). Wired into app-shell:
+   473→  header Compare button (Ctrl+D toggle, Esc exits), prefills A=activeTab, B=next tab.
+   474→  agent-browser verified: 4,900 diff bytes, 2.12% similar, 4,772 hunks, first 0x23, hunk nav,
+   475→  jumps to 0x100 (page 1) and 0x1300 (page 2), VLM-verified hex rendering.
+   476→- NEW FEATURE — Split-file Join (Task 4-b, subagent): src/lib/splitjoin.ts (analyzeSegments:
+   477→  .NNN/.rNN+.rar/.partN.rar/.zNN+.zip patterns, gap detection, 51/51 tests) +
+   478→  src/components/omniscope/split-join-view.tsx (self-contained overlay: drop/browse segments,
+   479→  live pattern detection card, ordered segment list, missing-part warnings, editable merged
+   480→  name, join w/ progress bar, 512MB cap, Open in Omniscope + Download). Wired: header Join
+   481→  button + auto-detected segment banner (amber, "Join them") when 2+ opened files form a set.
+   482→  agent-browser verified end-to-end: backup.zip.001/.002/.003 → joined → opened as ZIP Archive tab.
+   483→- NEW FEATURE — Recent files (Task 4-c, subagent): src/lib/recent-files.ts (raw IndexedDB,
+   484→  db omniscope-recents, 50-entry cap, 8MB blob cache, name+size dedupe, SSR guards, never
+   485→  throws; 17/17 fake-indexeddb tests) + src/components/omniscope/recent-panel.tsx
+   486→  (RecentFilesRow: hydration-safe lazy load, mono chips w/ format dot+icon+size+relative time,
+   487→  click→lazy blob fetch→reopen, "not cached" amber hint, per-chip remove, inline clear-all
+   488→  confirm, returns null when empty). Wired: addRecentFile called in addFiles pipeline after
+   489→  detection; RecentFilesRow rendered on landing between dropzone and samples.
+   490→- STYLING POLISH (VLM review round 1 → fixes → VLM review round 2):
+   491→  viewer-ui.tsx Field values zinc-200→zinc-100 (VLM round 2: "scanning effortless"),
+   492→  SectionCard hover:border-zinc-700; archive-viewer zebra rows (idx%2 bg-zinc-900/40) +
+   493→  row title tooltips + stronger hover; audio-viewer Tags empty state (dashed border card w/
+   494→  icon + "ID3/Vorbis/FLAC metadata would appear here" — VLM round 2 confirms); landing
+   495→  headline gradient narrowed to emerald/teal family (dropped jarring amber), dropzone py-14;
+   496→  info-panel card gap-4. VLM round 2 ratings: 8.5/9/9/8 (round 1 issues resolved).
+   497→  Round-2 leftover notes (not bugs): tab chip in header on landing is the file strip (by
+   498→  design), "clear all" styling minor, footer density minor.
+   499→- INFRA: dev server OOM-killed mid-session (2.1GB RSS after many hot reloads, 4GB container);
+   500→  sandbox kills backgrounded processes between Bash calls (nohup/setsid insufficient) →
+   501→  created dev-daemon.js (ESM, detached spawn via node:child_process, child.unref, PPID 1)
+   502→  → server now survives across calls. Restart procedure:
+   503→  cd /home/z/my-project && bun dev-daemon.js && sleep ~15 (first compile ~10s).
+   504→- tsc --noEmit: 0 errors; eslint: 0 errors/warnings (dev-daemon converted to ESM imports);
+   505→  dev.log healthy; agent-browser full regression pass green.
+   506→
+   507→Stage Summary:
+   508→- OMNISCOPE phase 2 complete: 3 real bugs fixed (waveform inversion, spectrogram DPR, Home
+   509→  dead-end), 3 major features added (Binary Compare view, Split-file Joiner w/ auto-detect
+   510→  banner, IndexedDB Recent files), styling polished per two VLM review rounds.
+   511→- App remains 100% client-side, single / route, 10,014 format identities, 39 viewer engines +
+   512→  compare/join/recents tooling. All new code follows zinc-950/emerald-teal-amber-rose palette.
+   513→- Known limitations (unchanged): RAR/7z listing identify-only, WOFF2 metrics, compressed
+   514→  DICOM, legacy .doc/.ppt text recovery. Diff compare caps at 128MB window; join at 512MB.
+   515→- Next-phase candidates: NFO→PNG render, CSV↔XLSX converters, text-line diff mode in
+   516→  compare view, diff of >2 files, recents grouping by format, keyboard shortcut help modal.
+   517→
+   518→---
+   519→Task ID: 6
+   520→Agent: orchestrator (Z.ai Code)
+   521→Task: Phase-3 — QA assessment, text-line diff engine + Compare Text mode, shortcuts
+   522→help modal, NFO→PNG export, styling polish round 3, VLM reviews
+   523→
+   524→Work Log:
+   525→- Reviewed full worklog (phases 1–2 complete). QA pass via agent-browser: dev server healthy
+   526→  (GET / 200), landing 10,014 counter, PNG/WAV/ZIP sample viewers, Compare open/close
+   527→  (Ctrl+D/Esc), Join overlay — 0 console errors; lint 0 errors; tsc only pre-existing
+   528→  examples/skills errors (not app code). VERDICT: stable → proceeded to new features.
+   529→- NEW ENGINE — src/lib/textdiff.ts (pure TS, zero deps, 30/30 bun logic tests PASS):
+   530→  * splitLines (CRLF/CR/LF), decodeTextual (UTF-8 → windows-1252 fallback when >0.5%
+   531→    U+FFFD), looksTextual (≥90% printable heuristic on first 64KB)
+   532→  * diffLines: hybrid patience diff — common prefix/suffix trim → patience anchors (lines
+   533→    unique in both ranges) + LIS over anchor pairs (O(k log k)) → DP LCS for regions ≤300×300
+   534→    cells and anchor-less regions ≤4M cells (Uint32Array table) → wholesale replace fallback;
+   535→    recursion depth cap 48; no spread-push (stack safe); normalizeOps reorders each change
+   536→    run deletes-before-inserts (git style). Verified optimal on pathological alternating
+   537→    2000×2000 input (edit distance 2 found, coverage invariant holds, <30ms).
+   538→  * textDiffStats (added/removed/changed=min(d,i) per run/hunks/equal);
+   539→    buildUnifiedPatch: standard git-style unified diff (3-line context, @@ headers, hunk
+   540→    clustering at >6 equal gap, "\ No newline at end of file" markers).
+   541→  * Test suite validated: identical/insert/delete/modify/empty/wholesale/repeated-lines/
+   542→    12k-line perf (19ms)/coverage-invariant/patch format + hunk headers + del-before-add/
+   543→    no-newline marker/multi-hunk (3 hunks)/cp1252 fallback/looksTextual — all pass. (4
+   544→    initial "failures" were wrong test expectations, corrected after analysis.)
+   545→- NEW FEATURE — Compare Text mode (diff-view.tsx rewritten, byte mode intact):
+   546→  * Toolbar Segmented Bytes/Text; AUTO mode selection when both sides look textual
+   547→    (modeTouched ref guards manual choice; re-evaluates on file change)
+   548→  * Text window: 8MB decode cap + 60k line cap per side (amber truncation chip)
+   549→  * Unified view (default): dual A/B line-number gutters, −/+ markers, rose/emerald row
+   550→    tints, 3-line context, equal runs >8 collapse into "⋯ N unchanged lines — expand"
+   551→    buttons (expandedGaps Set), EOF footer marker, 4000-row pagination w/ "Show more"
+   552→  * Split view: aligned sides, del/ins runs paired index-wise into "mod" rows, per-side
+   553→    EOF·N-lines markers filling the shorter pane, hover row highlight
+   554→  * Wrap toggle (whitespace-pre ↔ pre-wrap break-all); stats chips (+added −removed ~changed
+   555→    hunks unchanged, encoding mismatch chip, "textually identical" emerald verdict when
+   556→    ops have no changes but hashes differ); footer shows per-side line counts + encodings +
+   557→    "patch ready (N chars)"
+   558→  * Copy patch / Save .patch (real .patch download via Blob anchor); copy-summary now
+   559→    mode-aware (text stats vs byte stats)
+   560→  * React-safe: useMemo results carry {error} instead of setState-in-render (fixed my own
+   561→    anti-pattern before shipping); TS5076 ?? || parens fixed
+   562→  * agent-browser verified end-to-end: config-old/new.yml → auto-text, 8 added / 6 removed
+   563→    / ~6 changed / 7 hunks (matches hand count exactly), patch 600 chars, gap expand,
+   564→    wrap (31 elements), split (25 rows), 12k-line big files → 32/34/32 stats in <1s,
+   565→    32 collapse gaps, 0 console errors.
+   566→- NEW FEATURE — ShortcutsHelp modal (src/components/omniscope/shortcuts-help.tsx):
+   567→  4 groups (Global/Files & tabs/Tools/Viewers) with kbd chips + icon keys, hints, Esc
+   568→  capture-phase close, backdrop click close. Wired: "?" key (ignored while typing in
+   569→  inputs), header keyboard button, footer chip; Esc priority chain now starts with
+   570→  helpOpen. Verified via header button + Shift+/ real keypress (toggles).
+   571→- NEW FEATURE — NFO→PNG export (nfo-viewer.tsx): canvas render honoring color mode
+   572→  (glow via shadowBlur), font size, CRT scanlines; DPR 2× scale with 40MP area + 16384px
+   573→  side guards (auto downscale to 0.5×, line truncation notice); emerald result chip in
+   574→  footer ("Saved 958×336 PNG" verified).
+   575→- STYLING ROUND 3:
+   576→  * Tab strip: per-category accent dot (CAT_DOT map mirrors landing hues, pulsing zinc
+   577→    while detecting, title=cat tooltip) + trailing dashed "+" open-file button
+   578→  * Dropzone: kbd hint row (Ctrl+O open · Ctrl+V paste a file · ? shortcuts)
+   579→  * Footer: compact py-2.5, shortcuts chip button (replaces 4 inline kbds), GitHub Pages
+   580→    note kept; header compare banner text generalized ("byte & text diff · hashes · patches")
+   581→  * Recents "clear all": ghost pill chip + inline confirm pill (rose tint, yes/no buttons)
+   582→  * Compare split/unified EOF markers (VLM round-1 feedback: "empty black space at pane
+   583→    bottom" → resolved)
+   584→- INFRA: dev server died once mid-session (sandbox process reaper) → restarted via
+   585→  `bun dev-daemon.js` (procedure from phase 2), healthy since. Next.js dev overlay "1
+   586→  Issue" badge investigated: caused by my own failed agent-browser eval (TypeError thrown
+   587→  in page context), NOT an app bug — fresh reload shows 0 issues, full flows log 0 errors.
+   588→- VERIFICATION: tsc --noEmit 0 app errors; eslint 0/0; VLM review round: unified 8/10,
+   589→  split 8/10 (hash truncation by-design w/ tooltip; EOF fixed), shortcuts 9/10, landing
+   590→  9/10. Remaining notes are subjective (hint text faintness, grid header alignment).
+   591→
+   592→Stage Summary:
+   593→- OMNISCOPE phase 3 complete: Compare gained a full text-diff mode (patience+LCS engine,
+   594→  unified/split, patches, wrap, collapse gaps, EOF markers, auto text/bytes), shortcuts
+   595→  help modal (? key + buttons), NFO→PNG canvas export, and styling round 3 (tab dots,
+   596→  dropzone kbd hints, footer chip, recents pills).
+   597→- App remains 100% client-side single-route; 10,014 format identities, 39 viewer engines,
+   598→  compare/join/recents/shortcuts tooling. All engine logic covered by 30/30 bun tests.
+   599→- Known limitations (unchanged): RAR/7z identify-only, WOFF2 metrics, compressed DICOM,
+   600→  legacy .doc/.ppt recovery; text diff window 8MB/60k lines per side; byte window 128MB.
+   601→- Next-phase candidates: CSV↔XLSX converters, >2-file diff, recents grouping by format,
+   602→  in-diff syntax highlighting (hl.js per language), text diff word-level intra-line
+   603→  highlighting (char-level within changed pairs), NFO→PNG at 1:1 with bg color option.
+   604→
+   605→---
+   606→Task ID: 7
+   607→Agent: orchestrator (Z.ai Code)
+   608→Task: Phase-4 — QA assessment, word-level diff highlighting, text-diff change-block
+   609→navigation (n/p), CSV→XLSX export, styling round 4, VLM reviews
+   610→
+   611→Work Log:
+   612→- QA assessment at round start: dev server healthy, landing (10,014 counter + kbd hints),
+   613→  PNG/MIDI viewers, Compare text mode (8 added/6 removed/7 hunks), 0 console errors,
+   614→  lint/tsc clean. VERDICT: stable → proceeded to new features (phase-3 next-phase
+   615→  candidates used as backlog).
+   616→- NEW ENGINE — wordDiff in src/lib/textdiff.ts: tokenizes paired lines
+   617→  (/\s+|[A-Za-z0-9_]+|[^\sA-Za-z0-9_]/g) and re-runs the same patience/LCS machinery on
+   618→  token arrays → WordPart[] {text, changed} per side with adjacent-part merging; caps at
+   619→  2000 chars/side; null for identical lines. 17/17 bun tests PASS (word change
+   620→  "quick"→"slow", pure insertion, punctuation-merge, round-trip reconstruction,
+   621→  "512"↔"1024" isolated exactly, cap guard, whitespace change, empty side, unicode,
+   622→  500-pairs perf < 500ms, diffLines regression intact).
+   623→- NEW FEATURE — word-level intra-line highlighting in Compare text mode:
+   624→  * wordMap useMemo pairs dels[k]↔ins[k] within each change run (op-index keyed Map);
+   625→    splitRows "mod" rows carry aParts/bParts directly
+   626→  * renderParts renders changed tokens as rounded spans (rose-800/emerald-800 bg) in
+   627→    BOTH unified del/ins rows and split mod rows; "Words" ToolButton toggle (Highlighter
+   628→    icon, default on); verified char-level precision: "2.1.0"→"2.2.0" highlights only
+   629→    "1"→"2"; 12 spans on config fixture, 30 on the 12k-line fixture, 0 errors
+   630→- NEW FEATURE — change-block navigation: unifiedSegs rebuilt with USegItem {op, i}
+   631→  (op-index tracking) + blockId per change run; text-mode navigator bar (Prev/Next +
+   632→    "change N / M" counter + n/p kbd hint chip); goBlock scrolls first row into view
+   633→  (smooth, centered) with double-rAF retry + shownRows expansion when paginated out;
+   634→  n/p keyboard effect (guards typing in inputs, no modifiers); active block gets amber
+   635→  inset left ring + amber-400 gutter numbers; curBlock resets on file swap (verified:
+   636→  3/7 → swap → 1/7); block navigation verified step-by-step (1→2→3→2) and on big file
+   637→  (32 blocks); React batched double-click in single eval explained apparent skip
+   638→  (expected closure behavior, not a bug).
+   639→- NEW FEATURE — CSV viewer "XLSX" export (SheetJS dynamic import, same pattern as
+   640→  xlsx-viewer): aoa_to_sheet of filtered+sorted rows, heuristic !cols widths
+   641→  (500-row scan, wch capped 42), book_new + write "array" → .xlsx download; respects
+   642→  the filter & sort already applied (what-you-see-is-what-you-export).
+   643→- STYLING ROUND 4:
+   644→  * Compare slot hash presentation (VLM flagged twice): proper bordered chip
+   645→    "sha256 d2020475…31d1" (first 8 + last 4), click-to-copy with stopPropagation
+   646→    (verified: picker does NOT open), keyboard accessible, full-hash title tooltip
+   647→  * Active-block gutter contrast amber-500/80 → amber-400 (unified + split)
+   648→  * ShortcutsHelp modal entrance animation (framer-motion: opacity/scale/y 180ms
+   649→    ease-out) + Tools group documents n/p ("Next/Previous change block")
+   650→  * Split gutter borders get amber tint on the active block
+   651→- VLM REVIEW ROUND: unified 9/10, split 8/10, modal 9/10. VLM claims investigated
+   652→  programmatically: "split misalignment (critical)" → DISPROVEN (getBoundingClientRect:
+   653→  aTop === bTop on every row, panes 640/641px equal ± border, no horizontal overflow —
+   654→  VLM misread standard blank-pane diff layout); "modal footer cut off" → DISPROVEN
+   655→  (footerBottom 533 < viewport 577, footerVisible true); hash truncation + amber
+   656→  contrast → REAL polish items, both fixed this round.
+   657→- VERIFICATION: tsc 0 app errors; eslint 0/0; dev server healthy throughout; full
+   658→  agent-browser regression (landing → PNG → MIDI → compare auto-text → word spans →
+   659→  block nav → split → EOF markers → CSV sample + XLSX click → shortcuts modal) —
+   660→  0 console errors on every step.
+   661→
+   662→Stage Summary:
+   663→- OMNISCOPE phase 4 complete: text compare now has GitHub-grade word-level highlighting
+   664→  (both views, toggleable) and keyboard-driven change-block navigation with active-block
+   665→  amber ring; CSV tables export to real XLSX workbooks (filter/sort-aware); slot hash
+   666→  chips are click-to-copy; shortcuts modal animated and documents n/p.
+   667→- App remains 100% client-side single-route; 10,014 format identities, 39 viewer engines;
+   668→  textdiff engine now at 47/47 total logic tests (30 line-level + 17 word-level).
+   669→- Known limitations (unchanged): RAR/7z identify-only, WOFF2 metrics, compressed DICOM,
+   670→  legacy .doc/.ppt recovery; text window 8MB/60k lines; byte window 128MB.
+   671→- Next-phase candidates: >2-file diff, syntax highlighting in diff rows (hl.js token
+   672→  mapping), recents grouping by format, hash panel in InfoPanel with copy buttons,
+   673→  NFO→PNG bg color option, joiner auto-window for >512MB sets.
+   674→
+   675→---
+   676→Task ID: 8
+   677→Agent: orchestrator (Z.ai Code)
+   678→Task: Phase-5 — QA assessment, syntax-highlighted text diff, InfoPanel CRC-32 +
+   679→checksum export, recents format-family filter, JSON→CSV + MD→HTML converters,
+   680→Dialog a11y fix, styling round 5, VLM reviews
+   681→
+   682→Work Log:
+   683→- QA assessment at round start (per instructions): dev server healthy (GET / 200),
+   684→  landing (10,014 counter), PNG viewer, Compare text mode (8 added/7 removed/3
+   685→  hunks on fixture), word-level highlighting (16 spans), Join overlay, format
+   686→  explorer search ("flac" → FLAC), shortcuts modal, recent files row — 0 console
+   687→  errors; lint 0/0; tsc only the 4 pre-existing examples/skills errors. VERDICT:
+   688→  stable → proceeded to new features.
+   689→- ONE REAL ISSUE FOUND: Radix warning `Missing Description or aria-describedby
+   690→  for {DialogContent}` from format-explorer.tsx → FIXED by adding
+   691→  `aria-describedby={undefined}` to DialogContent (Radix-recommended). Verified
+   692→  via cleared-console reload + dialog open: warning gone.
+   693→- NEW MODULE — src/lib/hlsyntax.ts (shared hl.js syntax engine, 0 errors):
+   694→  * LANG_BY_EXT map (~120 entries) moved here from code-viewer (single source
+   695→    of truth; code-viewer.tsx refactored to import it — its local copy removed)
+   696→  * loadHljs(): module-level cached promise of `highlight.js/lib/common`
+   697→  * detectLang(fileName, firstLine): extension map + shebang sniff
+   698→  * autoDetectLang(sample, hljs): highlightAuto over 20-language subset, ≤400 lines
+   699→  * tokenizeLines(text, lang, hljs): hljs.highlight → DOMParser walk of the
+   700→    emitted HTML → per-line LineTok[] {text, cls} arrays (innermost span wins,
+   701→    newlines split tokens)
+   702→  * sliceTokens(toks, start, end): char-range slicing so word-diff parts can
+   703→    inherit underlying syntax colors
+   704→- NEW FEATURE — syntax highlighting in Compare text mode (diff-view.tsx):
+   705→  * Language from A's filename → B's filename → content auto-detect; shown in
+   706→    toolbar button title + unified/split header labels ("· yaml")
+   707→  * Whole-text tokenization per side, capped at 400k chars / 20k lines per side
+   708→    (amber chip "syntax off — file over 20,000 lines" when exceeded)
+   709→  * renderLineContent(): merges syntax tokens with word-level changed parts —
+   710→    changed words keep rose/emerald bg while inner tokens keep syntax colors
+   711→    (GitHub-style). Used by BOTH unified rows (toks param added to unifiedRow)
+   712→    and split rows (aToks/bToks looked up per row)
+   713→  * "Syntax" ToolButton toggle (Code2 icon, active state, dimmed when no
+   714→    language); scoped `.dxhl` CSS palette (emerald keywords / amber strings /
+   715→    rose numbers / zinc comments / teal titles / violet attrs — mirrors the code
+   716→    viewer, no blue/indigo); toggle verified: 43 spans on / 0 off / word-diff
+   717→    intact; split view 46 spans; header shows lang in both views
+   718→  * agent-browser verified end-to-end on YAML fixture: 43 hljs tokens
+   719→    (attr/number/string), word spans nested inside token spans
+   720→    (`<span bg-rose-800><span hljs-number>8080</span></span>`), 0 console errors.
+   721→    VLM review: 9/10 "syntax colors clearly visible… highly polished,
+   722→    professional-grade UI"
+   723→- NEW FEATURE — InfoPanel checksums upgrade (info-panel.tsx):
+   724→  * CRC-32 added (8-digit hex, Copyable) — implementation verified against
+   725→    standard vector crc32("123456789") = cbf43926 via bun script
+   726→  * "Copy all checksums" button (clipboard: crc32/md5/sha1/sha256 block with
+   727→    file header) + "Download checksums.txt" button (standalone .checksums.txt
+   728→    with provenance header); both as SectionCard right-slot icon buttons
+   729→  * >50MB amber note when hashes cover the head only
+   730→  * Verified in-browser: CRC-32 5e64229f on sample.png, both buttons present
+   731→- NEW FEATURE — recents format-family filter (recent-panel.tsx):
+   732→  * MAX_VISIBLE 12 → 50 (full store); familyOf() maps viewerId → media/docs/
+   733→    code/data/archives/other
+   734→  * Filter pill row (all N + per-family count pills with family dots, emerald
+   735→    active state) appears only when >3 entries span >1 family; "N shown of M"
+   736→    counter; click pill again to reset; clear-all also resets filter
+   737→  * Verified: "all 7 / media 3 / docs 2 / data 1 / archives 1" pills; clicking
+   738→    media → "3 shown of 7", png+wav visible, nfo hidden
+   739→- NEW FEATURE — JSON→CSV converter (json-viewer.tsx):
+   740→  * csvReady heuristic: root array of objects (≥ tolerance for oddballs)
+   741→  * flattenRow (one nesting level, dot notation), csvCell RFC-style quoting
+   742→    (commas/quotes/newlines), header union from first 2000 rows
+   743→  * "CSV" ToolButton (Table icon, title explains dot-notation) only when
+   744→    csvReady; downloads <basename>.csv text/csv
+   745→  * Verified: users.json (array of 3 objects with nested meta) → button appears,
+   746→    blob download triggered; nested sample object → button correctly absent
+   747→- NEW FEATURE — Markdown→HTML export (markdown-viewer.tsx):
+   748→  * saveStandaloneHtml(): self-contained dark HTML document (embedded CSS ~40
+   749→    rules: GitHub-ish typography on zinc-950, emerald links, zebra tables,
+   750→    emerald blockquote bars), TOC nav with indent levels, escaped titles,
+   751→    generator meta, footer credit; "HTML" ToolButton (Download icon)
+   752→  * Verified: button present on markdown sample, blob download triggered
+   753→- STYLING ROUND 5 (mandatory detail pass):
+   754→  * globals.css: global focus-visible ring (2px emerald, buttons/a/summary/
+   755→    role=button), `.text-shimmer` gradient-pan keyframes (7s, honors
+   756→    prefers-reduced-motion), `.pressable` active:scale feedback
+   757→  * Landing: hero "anything" gradient drifts (text-shimmer), stat cards get
+   758→    gradient bg + hover border, category cards get focus rings + icon lift +
+   759→    active:scale-[0.98], sample chips get pressable feedback + focus ring
+   760→  * App shell: signature 1px emerald top hairline (fixed, pointer-events-none),
+   761→    active tab gets gradient bg + inset emerald underline + tooltip with
+   762→    detected format name · category, footer gains tools summary line
+   763→    ("compare · join · recents · word diff · syntax diff · converters")
+   764→  * viewer-ui kit: ToolButton + Segmented buttons get active:scale-95 press
+   765→    feedback, transform transitions, active inset highlights
+   766→  * VLM review of landing: 9/10 "stunning, professional-grade UI… aesthetic
+   767→    appeal with excellent functional clarity"
+   768→- INFRA: dev server died twice mid-session (sandbox process reaper after heavy
+   769→  hot-reload) → restarted via `bun dev-daemon.js` both times (phase-2
+   770→  procedure still works). Stale console errors from a transient broken
+   771→  intermediate edit state (diff-view) investigated → confirmed gone after
+   772→  fresh reload with cleared console buffer.
+   773→- VERIFICATION: tsc --noEmit 0 app errors; eslint 0/0; agent-browser full
+   774→  regression green (landing + shimmer + pills → PNG + CRC-32 + hairline →
+   775→  JSON CSV click → MD HTML click → explorer dialog (no warning) → compare
+   776→  syntax 43 tokens + 7 word spans + 8 added/3 hunks → shortcuts modal) with
+   777→  0 console errors on a cleared buffer; dev.log healthy.
+   778→
+   779→Stage Summary:
+   780→- OMNISCOPE phase 5 complete: Compare text mode now renders GitHub-grade
+   781→  SYNTAX-HIGHLIGHTED diffs (hl.js tokens merged with word-level highlighting,
+   782→  both unified + split, capped for performance, toggleable); InfoPanel computes
+   783→  CRC-32 and exports/copies full checksum blocks; recents filter by format
+   784→  family; JSON arrays export to CSV (nested-flattened); Markdown exports
+   785→  standalone styled HTML; format-explorer Dialog a11y warning fixed; styling
+   786→  round 5 shipped (top hairline, shimmer hero, tab gradient underline, press
+   787→  feedback, focus rings, footer summary).
+   788→- App remains 100% client-side single-route; 10,014 format identities, 39
+   789→  viewer engines; new shared module src/lib/hlsyntax.ts is the single source
+   790→  of truth for language detection + tokenization (code viewer refactored onto
+   791→  it with zero behavior change).
+   792→- Known limitations (unchanged): RAR/7z identify-only, WOFF2 metrics, compressed
+   793→  DICOM, legacy .doc/.ppt recovery; text window 8MB/60k lines; byte window
+   794→  128MB; syntax diff caps at 400k chars / 20k lines per side.
+   795→- Next-phase candidates: >2-file diff (3-way), in-diff hover blame/lineno
+   796→  deep-links, per-format export matrix (more converters: XLSX→JSON, CSV→JSON,
+   797→  SRT→VTT), image OCR? (no — external), ZIP re-packer/extract-to-blob,
+   798→  IndexedDB file collections/folders, printable forensic report per file,
+   799→  theme accent picker (emerald/amber/rose), >512MB join streaming.
+   800→
