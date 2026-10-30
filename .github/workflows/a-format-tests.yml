@@ -1,0 +1,26 @@
+name: A-prefix format regression
+
+on:
+  pull_request:
+    paths:
+      - "src/lib/formats/**"
+      - "src/lib/detect.ts"
+      - "src/lib/arff.ts"
+      - "src/lib/types.ts"
+      - "src/components/viewers/**"
+      - "tests/a-extension-support.test.ts"
+      - ".github/workflows/a-format-tests.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun test tests/a-extension-support.test.ts
+      - run: bunx tsc --noEmit
