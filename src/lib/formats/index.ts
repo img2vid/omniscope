@@ -13,6 +13,7 @@ import { EXTRA_FORMATS_J } from "./extra-formats-j";
 import { EXTRA_FORMATS_K } from "./extra-formats-k";
 import { generateConventionFormats } from "./conventions";
 import { generateFamilyFormats } from "./families";
+import { generateAPrefixedFormats } from "./a-prefixed";
 
 function slug(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "fmt";
@@ -33,6 +34,7 @@ const ALL_RAW: RawFormat[] = [
   ...EXTRA_FORMATS_K,
   ...generateConventionFormats(),
   ...generateFamilyFormats(),
+  ...generateAPrefixedFormats(),
 ];
 
 /** Merge format sources → records + lookup maps. Extension duplicates: first wins. */

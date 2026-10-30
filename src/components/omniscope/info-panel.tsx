@@ -329,6 +329,8 @@ export function InfoPanel({ tab, openTabs, onClose, onJumpToTab }: { tab: FileTa
                     <><Chip tone="emerald">{d.method}</Chip><span className="text-zinc-500">binary signature</span></>
                   ) : d.method === "extension" ? (
                     <><Chip tone="teal">extension</Chip><span className="text-zinc-580">.{d.ext}</span></>
+                  ) : d.method === "pattern" ? (
+                    <><Chip tone="amber">filename pattern</Chip><span className="text-zinc-500">unclassified; no format inferred</span></>
                   ) : d.method === "content" ? (
                     <><Chip tone="amber">content</Chip><span className="text-zinc-500">sniffed</span></>
                   ) : (

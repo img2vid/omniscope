@@ -6,13 +6,17 @@ import type { FormatCategory } from "@/lib/types";
 
 export interface ExplorerRow {
   key: string;
-  kind: "format" | "mime" | "encoding";
+  kind: "format" | "pattern" | "mime" | "encoding";
   label: string;
   sub: string;
   cat: FormatCategory;
   viewer: string;
   desc?: string;
 }
+
+const AUTHORED_RECORDS = FORMAT_RECORDS.filter((r) => r.recognition !== "pattern");
+const AUTHORED_EXTENSIONS = [...EXT_MAP.values()].filter((r) => r.recognition !== "pattern").length;
+const PATTERN_ALIASES = EXT_MAP.size - AUTHORED_EXTENSIONS;
 
 const EXT_ONLY = FORMAT_RECORDS.flatMap((r) => r.ext.map((e) => ({ e, r })));
 
@@ -29,29 +33,30 @@ const MIME_UNIQUE = (() => {
 
 export const FORMAT_STATS = (() => {
   const byCat = new Map<FormatCategory, number>();
-  for (const r of FORMAT_RECORDS) byCat.set(r.cat, (byCat.get(r.cat) ?? 0) + 1);
+  for (const r of AUTHORED_RECORDS) byCat.set(r.cat, (byCat.get(r.cat) ?? 0) + 1);
   const sigCount = new Set<string>([
     ...SIGNATURES.map((s) => s.key + s.pattern),
     ...FORMAT_RECORDS.filter((r) => r.sig).map((r) => r.key + r.sig),
   ]).size;
   const encodingLabels = new Set(ENCODINGS.flatMap((g) => g.labels)).size;
   return {
-    formats: FORMAT_RECORDS.length,
-    extensions: EXT_MAP.size,
+    formats: AUTHORED_RECORDS.length,
+    extensions: AUTHORED_EXTENSIONS,
+    patternAliases: PATTERN_ALIASES,
     mimes: MIME_UNIQUE.length,
     signatures: sigCount,
     encodings: encodingLabels,
     categories: byCat.size,
     byCat: [...byCat.entries()].sort((a, b) => b[1] - a[1]),
     /** total recognized format identities */
-    identities: EXT_MAP.size + MIME_UNIQUE.length + sigCount + encodingLabels,
+    identities: AUTHORED_EXTENSIONS + MIME_UNIQUE.length + sigCount + encodingLabels,
   };
 })();
 
 export const EXPLORER_ROWS: ExplorerRow[] = [
   ...EXT_ONLY.map(({ e, r }) => ({
     key: `ext:${e}`,
-    kind: "format" as const,
+    kind: (r.recognition === "pattern" ? "pattern" : "format") as "pattern" | "format",
     label: "." + e,
     sub: r.name,
     cat: r.cat,

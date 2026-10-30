@@ -128,6 +128,7 @@ export function detectFromHead(name: string, head: Uint8Array): DetectedFormat {
   if (!head || head.length === 0) return { ...UNKNOWN, name: "Empty file", viewer: "text", cat: "text" };
   const ext = getExt(name);
   const extRecord = findByExt(ext);
+  const patternRecord = extRecord?.recognition === "pattern" ? extRecord : undefined;
   const conflicts: string[] = [];
 
   // 1) magic signatures
@@ -183,10 +184,10 @@ export function detectFromHead(name: string, head: Uint8Array): DetectedFormat {
     let resolved = chosen;
     const genericXml =
       (chosen.key === "xml" || chosen.viewer === "xml") && sigMatches.every((m) => m.sig.key === "xml");
-    if (genericXml && extRecord && extRecord.viewer !== "xml") {
+    if (genericXml && extRecord && !patternRecord && extRecord.viewer !== "xml") {
       resolved = extRecord;
     }
-    if (extRecord && extRecord.key !== resolved.key) conflicts.push(`${extRecord.name} (from extension .${ext})`);
+    if (extRecord && !patternRecord && extRecord.key !== resolved.key) conflicts.push(`${extRecord.name} (from extension .${ext})`);
     return {
       record: resolved,
       name: resolved.name,
@@ -211,7 +212,7 @@ export function detectFromHead(name: string, head: Uint8Array): DetectedFormat {
   }
 
   // 3) extension
-  if (extRecord) {
+  if (extRecord && !patternRecord) {
     return {
       record: extRecord, name: extRecord.name, cat: extRecord.cat, viewer: extRecord.viewer,
       mime: extRecord.mime ?? "application/octet-stream", desc: extRecord.desc,
@@ -225,6 +226,10 @@ export function detectFromHead(name: string, head: Uint8Array): DetectedFormat {
   if (printable > 0.85 && validUtf8) {
     const text = new TextDecoder("utf-8", { fatal: false }).decode(head.subarray(0, Math.min(head.length, 2048)));
     const t = text.trimStart();
+    if (/^@relation\s+/i.test(t) && /^@attribute\s+/im.test(t)) {
+      const arff = findByExt("arff");
+      return { record: arff ?? null, name: "Attribute-Relation File Format (ARFF)", cat: "data", viewer: "arff", mime: "text/plain", method: "content", ext };
+    }
     if (t.startsWith("{") || t.startsWith("[")) {
       try {
         JSON.parse(t.length > 100 ? t.slice(0, 100) + (t.endsWith("}") ? "" : "") : t);
@@ -264,6 +269,14 @@ export function detectFromHead(name: string, head: Uint8Array): DetectedFormat {
       }
     }
     return { record: null, name: "Plain text (detected)", cat: "text", viewer: "text", mime: "text/plain", method: "content", ext };
+  }
+
+  // A-numbered names are *not* independent formats. Route opaque data to
+  // native hex inspection only after magic and content detection have failed.
+  if (patternRecord) {
+    return { record: null, name: patternRecord.name, cat: "binary", viewer: "hex",
+      mime: "application/octet-stream", desc: patternRecord.desc,
+      method: "pattern", ext, magicHex: toHex(head.subarray(0, Math.min(8, head.length))) };
   }
 
   // 5) unknown binary

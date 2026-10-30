@@ -10,7 +10,7 @@ export type ViewerId =
   | "mobi" | "rtf" | "archive" | "three3d" | "font" | "sqlite" | "chess"
   | "midi" | "subtitle" | "map" | "gcode" | "nfo" | "torrent" | "exe"
   | "wasm" | "nbt" | "eml" | "ical" | "vcf" | "dbf" | "dicom" | "svg"
-  | "ico" | "fallback";
+  | "ico" | "arff" | "fallback";
 
 /** A format record as authored in the knowledge base. */
 export interface RawFormat {
@@ -19,6 +19,8 @@ export interface RawFormat {
   name: string;
   cat: FormatCategory;
   viewer: ViewerId;
+  /** A syntactic filename pattern, NOT a verified independent file format. */
+  recognition?: "pattern";
   mime?: string;
   desc?: string;
   /** hex magic bytes, bytes separated by spaces, "??" = wildcard, e.g. "89 50 4E 47 0D 0A 1A 0A" */
@@ -44,7 +46,8 @@ export interface MimeRecord {
 export type DetectionMethod =
   | "magic"        // matched binary signature
   | "container"    // sniffed inside container (CFB / OOXML / zip directory)
-  | "extension"    // matched via file extension
+  | "extension"    // matched via an authored file extension
+  | "pattern"      // matched a generic filename convention (no codec implied)
   | "content"      // sniffed as text / structured content
   | "unknown";
 

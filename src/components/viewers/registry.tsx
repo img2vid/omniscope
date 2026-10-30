@@ -28,6 +28,7 @@ export const VIEWER_REGISTRY: Record<string, React.ComponentType<ViewerProps>> =
   json: d(() => import("./json-viewer")),
   xml: d(() => import("./xml-viewer")),
   csv: d(() => import("./csv-viewer")),
+  arff: d(() => import("./arff-viewer")),
   markdown: d(() => import("./markdown-viewer")),
   svg: d(() => import("./svg-viewer")),
   ico: d(() => import("./ico-viewer")),
@@ -68,7 +69,7 @@ export const VIEWER_REGISTRY: Record<string, React.ComponentType<ViewerProps>> =
 
 export const VIEWER_LABELS: Record<string, string> = {
   image: "Image", video: "Video", audio: "Audio", text: "Text", code: "Code", hex: "Hex",
-  json: "JSON", xml: "XML", csv: "Table", markdown: "Markdown", pdf: "PDF", docx: "Word",
+  json: "JSON", xml: "XML", csv: "Table", arff: "ARFF dataset", markdown: "Markdown", pdf: "PDF", docx: "Word",
   xlsx: "Excel", pptx: "Slides", odf: "OpenDocument", epub: "EPUB", mobi: "Mobi",
   rtf: "RTF", archive: "Archive", three3d: "3D", font: "Font", sqlite: "SQLite",
   chess: "Chess", midi: "MIDI", subtitle: "Subtitles", map: "Map", gcode: "G-code",

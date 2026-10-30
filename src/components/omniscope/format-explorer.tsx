@@ -12,6 +12,7 @@ const ROW_H = 52;
 
 const KIND_META: Record<string, { label: string; cls: string }> = {
   format: { label: "ext", cls: "border-emerald-900/60 bg-emerald-950/40 text-emerald-300" },
+  pattern: { label: "pattern", cls: "border-zinc-700 bg-zinc-900 text-zinc-400" },
   mime: { label: "mime", cls: "border-teal-900/60 bg-teal-950/40 text-teal-300" },
   encoding: { label: "charset", cls: "border-amber-900/60 bg-amber-950/40 text-amber-300" },
 };
@@ -82,7 +83,7 @@ export function FormatExplorer({
             <Boxes className="h-4 w-4 text-emerald-400" />
             Format registry
             <span className="ml-2 font-mono text-[11px] font-normal text-zinc-500">
-              {formatNum(EXPLORER_ROWS.length)} entries · {formatNum(FORMAT_STATS.signatures)} signatures
+              {formatNum(EXPLORER_ROWS.length)} entries ({formatNum(FORMAT_STATS.patternAliases)} unverified filename patterns) · {formatNum(FORMAT_STATS.signatures)} signatures
             </span>
           </DialogTitle>
         </DialogHeader>
@@ -154,6 +155,7 @@ export function FormatExplorer({
         <div className="flex items-center gap-3 border-t border-zinc-800 bg-zinc-900/40 px-4 py-2 text-[10px] text-zinc-500">
           <span className="inline-flex items-center gap-1"><Package className="h-3 w-3" /> virtualized list</span>
           <span className="inline-flex items-center gap-1"><Hash className="h-3 w-3" /> {formatNum(FORMAT_STATS.formats)} format records</span>
+          <span className="hidden sm:inline">patterns open with content detection / hex, not a dedicated decoder</span>
           <span className="ml-auto inline-flex items-center gap-1">
             open any file anyway <ChevronRight className="h-3 w-3" />
           </span>
