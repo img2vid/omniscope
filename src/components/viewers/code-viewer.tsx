@@ -5,6 +5,7 @@ import { ViewerProps } from "@/lib/types";
 import { ViewerToolbar, ToolButton, ToolbarDivider, ViewerBody, ErrorCard, LoadingState, ToolbarSelect, Chip } from "./viewer-ui";
 import { cn, downloadBlob, ENCODINGS, decodeWith, guessTextEncoding, formatNum } from "@/lib/utils";
 import { LANG_BY_EXT } from "@/lib/hlsyntax";
+import { readTextBytes } from "@/lib/text-reader";
 import {
   Search, WrapText, ListOrdered, Copy, Download, Hash, ChevronsUpDown, CaseSensitive,
 } from "lucide-react";
@@ -14,7 +15,7 @@ const LINE_H = 21;
 
 interface Line { n: number; text: string; }
 
-export default function CodeViewer({ file, arrayBuffer, head, detected, fileName, forcedPlain }: ViewerProps & { forcedPlain?: boolean }) {
+export default function CodeViewer({ file, arrayBuffer, detected, fileName, forcedPlain }: ViewerProps & { forcedPlain?: boolean }) {
   const [encoding, setEncoding] = React.useState<string>("utf-8");
   const [guessed, setGuessed] = React.useState<string>("");
   const [lines, setLines] = React.useState<Line[] | null>(null);
@@ -31,31 +32,34 @@ export default function CodeViewer({ file, arrayBuffer, head, detected, fileName
   const [gotoLine, setGotoLine] = React.useState("");
   const bodyRef = React.useRef<HTMLDivElement>(null);
   const matchRef = React.useRef<HTMLInputElement>(null);
+  const sourceRef = React.useRef<Uint8Array>(new Uint8Array());
 
   const ext = fileName.split(".").pop()?.toLowerCase() ?? "";
 
   // ---- load text ----
   React.useEffect(() => {
-    const bytes = arrayBuffer ? new Uint8Array(arrayBuffer) : head;
-    const g = guessTextEncoding(bytes);
-    setGuessed(g.label);
-    setEncoding(g.label);
-    let src = bytes;
-    if (src.length > MAX_DECODE) {
-      src = src.subarray(0, MAX_DECODE);
-      setTruncated(true);
-    }
-    let text: string;
-    try {
-      text = decodeWith(src, g.label);
-    } catch (e) {
-      setError(String(e));
-      return;
-    }
-    if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
-    const ls = text.split(/\r\n|\r|\n/);
-    setLines(ls.map((t, i) => ({ n: i + 1, text: t })));
-  }, [arrayBuffer, head]);
+    let cancelled = false;
+    setLines(null);
+    setError(null);
+    sourceRef.current = new Uint8Array();
+    (async () => {
+      try {
+        const { bytes, truncated } = await readTextBytes(file, arrayBuffer, MAX_DECODE);
+        if (cancelled) return;
+        sourceRef.current = bytes;
+        const g = guessTextEncoding(bytes);
+        setGuessed(g.label);
+        setEncoding(g.label);
+        setTruncated(truncated);
+        let text = decodeWith(bytes, g.label);
+        if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
+        setLines(text.split(/\r\n|\r|\n/).map((t, i) => ({ n: i + 1, text: t })));
+      } catch (e) {
+        if (!cancelled) setError(String(e));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [arrayBuffer, file]);
 
   // ---- language + highlight.js ----
   React.useEffect(() => {
@@ -78,10 +82,8 @@ export default function CodeViewer({ file, arrayBuffer, head, detected, fileName
 
   // re-decode when encoding changes
   React.useEffect(() => {
-    if (!lines || encoding === guessed) return;
-    const bytes = arrayBuffer ? new Uint8Array(arrayBuffer) : head;
-    let src = bytes;
-    if (src.length > MAX_DECODE) src = src.subarray(0, MAX_DECODE);
+    if (!lines || !sourceRef.current.byteLength) return;
+    const src = sourceRef.current;
     try {
       let text = decodeWith(src, encoding);
       if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);

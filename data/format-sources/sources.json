@@ -1,0 +1,25 @@
+{
+  "retrieved": "2026-10-31",
+  "sources": [
+    {
+      "id": "github-linguist",
+      "repository": "github-linguist/linguist",
+      "commit": "681a3171a3f8d1ccab93e646e7753cba42186915",
+      "path": "lib/linguist/languages.yml",
+      "blob": "3eabbcc5341884422881be4517152ec2759bdc08",
+      "snapshot": "data/format-sources/linguist.json",
+      "license": "MIT",
+      "licenseFile": "third_party/github-linguist-LICENSE.txt"
+    },
+    {
+      "id": "mime-db",
+      "repository": "jshttp/mime-db",
+      "commit": "27f4b920cbade9817f37814dbec5e4d3930e025f",
+      "path": "db.json",
+      "blob": "9c7a37a4bb98c2836817c8ab228059fd9ad76b22",
+      "snapshot": "data/format-sources/mime-db.json",
+      "license": "MIT",
+      "licenseFile": "third_party/mime-db-LICENSE.txt"
+    }
+  ]
+}
