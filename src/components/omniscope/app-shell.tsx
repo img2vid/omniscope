@@ -14,7 +14,8 @@ import { ShortcutsHelp } from "./shortcuts-help";
 import { AccentPicker } from "./accent-picker";
 import { analyzeSegments } from "@/lib/splitjoin";
 import { addRecentFile } from "@/lib/recent-files";
-import { FORMAT_STATS } from "@/lib/formats/stats";
+import { FORMAT_STATS, FORMATS_STATS_VERSION } from "@/lib/formats/stats";
+import { ensureFormatsLoaded } from "@/lib/formats";
 import { buildBatchReportHtml, type ForensicInput } from "@/lib/forensic-report";
 import { shannonEntropy, crc32, sha1, sha256, md5, toHex, ENCODINGS, cn, formatBytes } from "@/lib/utils";
 import {
@@ -61,18 +62,38 @@ export function OmniscopeApp() {
   const [joinSeed, setJoinSeed] = React.useState<File[]>([]);
   const [segmentHint, setSegmentHint] = React.useState<{ files: File[]; base: string; pattern: string } | null>(null);
   const [flashTabId, setFlashTabId] = React.useState<string | null>(null);
+  const [formatsReady, setFormatsReady] = React.useState(false);
   const inputRef = React.useRef<HTMLInputElement>(null);
   const stripRef = React.useRef<HTMLDivElement>(null);
   const buffersRef = React.useRef(new Map<string, ArrayBuffer>());
   const headsRef = React.useRef(new Map<string, Uint8Array>());
 
-  const totalIdentities = React.useMemo(() => FORMAT_STATS.identities, []);
+  /* lazy letter-A expansion (~700 extra real extensions): kick off at mount,
+     re-render stats once merged. addFiles also awaits it before detecting. */
+  React.useEffect(() => {
+    let alive = true;
+    ensureFormatsLoaded().then(() => {
+      if (alive) setFormatsReady(true);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const totalIdentities = React.useMemo(
+    () => FORMAT_STATS.identities,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [formatsReady, FORMATS_STATS_VERSION.n],
+  );
 
   const activeTab = tabs.find((t) => t.id === activeId) ?? null;
 
   /* ---------------- file pipeline ---------------- */
 
   const addFiles = React.useCallback(async (files: File[]) => {
+    // the A-expansion chunk may still be in flight on a very fast drop — wait so
+    // detection always sees the full extension registry (idempotent, fast)
+    await ensureFormatsLoaded();
     for (const file of files.slice(0, 24)) {
       const id = `f${++tabSeq}-${Date.now()}`;
       const tab: FileTab = {

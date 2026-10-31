@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { EXPLORER_ROWS, FORMAT_STATS } from "@/lib/formats/stats";
+import { EXPLORER_ROWS, FORMAT_STATS, FORMATS_STATS_VERSION } from "@/lib/formats/stats";
 import { CATEGORY_LABELS } from "@/lib/formats";
 import type { FormatCategory } from "@/lib/types";
 import { cn, formatNum } from "@/lib/utils";
@@ -50,7 +50,9 @@ export function FormatExplorer({
         (r.desc?.toLowerCase().includes(q) ?? false)
       );
     });
-  }, [query, cat]);
+    // FORMATS_STATS_VERSION: rows are refreshed in place when lazy format expansions register
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, cat, FORMATS_STATS_VERSION.n]);
 
   React.useEffect(() => {
     const el = listRef.current;
@@ -69,7 +71,8 @@ export function FormatExplorer({
     const s = new Set<string>();
     for (const r of EXPLORER_ROWS) s.add(r.cat);
     return [...s].sort();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [FORMATS_STATS_VERSION.n]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
