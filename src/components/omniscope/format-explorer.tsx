@@ -12,6 +12,7 @@ const ROW_H = 52;
 
 const KIND_META: Record<string, { label: string; cls: string }> = {
   format: { label: "ext", cls: "border-emerald-900/60 bg-emerald-950/40 text-emerald-300" },
+  filename: { label: "name", cls: "border-emerald-900/60 bg-emerald-950/40 text-emerald-300" },
   mime: { label: "mime", cls: "border-teal-900/60 bg-teal-950/40 text-teal-300" },
   encoding: { label: "charset", cls: "border-amber-900/60 bg-amber-950/40 text-amber-300" },
 };
@@ -141,8 +142,8 @@ export function FormatExplorer({
                     <span className="hidden shrink-0 rounded border border-zinc-800 bg-zinc-900 px-1.5 py-0.5 text-[10px] text-zinc-400 sm:inline">
                       {CATEGORY_LABELS[r.cat as FormatCategory] ?? r.cat}
                     </span>
-                    <span className="hidden w-20 shrink-0 items-center gap-1 text-[10px] text-zinc-500 md:flex">
-                    <FileCode2 className="h-3 w-3" /> {r.viewer}
+                    <span title={r.source ? `${r.source}: ${r.desc ?? ""}` : r.viewer} className="hidden w-20 shrink-0 items-center gap-1 text-[10px] text-zinc-500 md:flex">
+                    <FileCode2 className="h-3 w-3" /> {r.reading === "inspect" ? "Bytes only" : r.reading === "text" ? "Text" : r.viewer}
                     </span>
                   </div>
                 ))}

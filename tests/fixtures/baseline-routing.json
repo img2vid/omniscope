@@ -1,0 +1,19 @@
+{
+  "extensions": 5875,
+  "previouslyUnreachable": [
+    "cmakelists.txt",
+    "dat (nbt)",
+    "docx legacy",
+    "dsym",
+    "id",
+    "tags",
+    "tar.z",
+    "tmcommand",
+    "tmlanguage",
+    "tmmacro",
+    "tmpreferences",
+    "tmsnippet",
+    "tmtheme"
+  ],
+  "sha256": "08a48d9e7fe644521e9867cdd364eb88f2bb2eb787926583e1e2934efc41d3f1"
+}

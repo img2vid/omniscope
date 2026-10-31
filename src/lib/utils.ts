@@ -1,3 +1,6 @@
+import { toHexByte } from "./byte-pattern";
+export { toHexByte, toHex, parseHexPattern } from "./byte-pattern";
+export { ENCODINGS } from "./encodings";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 
@@ -38,10 +41,6 @@ export function formatDuration(sec: number): string {
 }
 
 /* ----------------------------------- hex ----------------------------------- */
-
-export function toHexByte(b: number): string {
-  return b.toString(16).toUpperCase().padStart(2, "0");
-}
 
 /* ------------------------------ live accent color ------------------------------ */
 
@@ -88,12 +87,6 @@ export function observeAccent(callback: () => void): () => void {
   return () => mo.disconnect();
 }
 
-export function toHex(bytes: Uint8Array, sep = " "): string {
-  const out: string[] = [];
-  for (let i = 0; i < bytes.length; i++) out.push(toHexByte(bytes[i]));
-  return out.join(sep);
-}
-
 export function hexDumpLine(bytes: Uint8Array, offset: number): string {
   let hex = "";
   let ascii = "";
@@ -109,17 +102,6 @@ export function hexDumpLine(bytes: Uint8Array, offset: number): string {
     if (i === 7) hex += " ";
   }
   return `${offset.toString(16).padStart(8, "0")}  ${hex} |${ascii}|`;
-}
-
-export function parseHexPattern(pattern: string): (number | null)[] | null {
-  const parts = pattern.trim().split(/\s+/);
-  const out: (number | null)[] = [];
-  for (const p of parts) {
-    if (p === "??" || p === "**") { out.push(null); continue; }
-    if (!/^[0-9a-fA-F]{2}$/.test(p)) return null;
-    out.push(parseInt(p, 16));
-  }
-  return out.length ? out : null;
 }
 
 export function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
@@ -377,21 +359,6 @@ export function guessTextEncoding(head: Uint8Array): EncodingGuess {
   if (isLikelyValidUtf8(head)) return { label: "utf-8", confidence: 0.9 };
   return { label: "windows-1252", confidence: 0.5 };
 }
-
-/** Complete WHATWG Encoding Standard label list (all real TextDecoder labels). */
-export const ENCODINGS: { group: string; labels: string[] }[] = [
-  { group: "Unicode", labels: ["unicode-1-1-utf-8", "unicode11utf8", "unicode20utf8", "utf-8", "utf8", "x-unicode20utf8"] },
-  { group: "UTF-16 / UTF-32", labels: ["utf-16", "utf-16le", "unicodefeff", "utf-16be", "unicodefffe", "utf-32", "utf-32le", "utf-32be"] },
-  { group: "Western European", labels: ["ansi_x3.4-1968", "ascii", "cp1252", "cp819", "csisolatin1", "ibm819", "iso-8859-1", "iso-ir-100", "iso8859-1", "iso88591", "iso_8859-1", "iso_8859-1:1987", "l1", "latin1", "us-ascii", "x-cp1252"] },
-  { group: "More Latin", labels: ["csisolatin2", "iso-8859-2", "iso-ir-101", "iso8859-2", "iso88592", "iso_8859-2", "iso_8859-2:1987", "l2", "latin2", "cp1250", "x-cp1250", "windows-1250", "csisolatin3", "iso-8859-3", "iso-ir-109", "iso8859-3", "iso88593", "iso_8859-3", "iso_8859-3:1988", "l3", "latin3", "csisolatin4", "iso-8859-4", "iso-ir-110", "iso8859-4", "iso88594", "iso_8859-4", "iso_8859-4:1988", "l4", "latin4", "cp1257", "windows-1257", "csisolatin5", "iso-8859-5", "iso-ir-144", "iso8859-5", "iso88595", "iso_8859-5", "iso_8859-5:1988", "csisolatincyrillic", "cyrillic", "csisolatingreek", "greek", "greek8", "iso-8859-7", "iso-ir-126", "iso8859-7", "iso88597", "iso_8859-7", "iso_8859-7:1987", "l7", "latin-greek", "csisolatin6", "iso-8859-10", "iso-ir-157", "iso8859-10", "iso885910", "l6", "latin6", "iso-8859-13", "iso8859-13", "iso885913", "csisolatin9", "iso-8859-15", "iso8859-15", "iso885915", "iso_8859-15", "l9", "latin9", "iso-8859-16", "iso8859-16", "iso885916", "cp1256", "x-cp1256", "windows-1256", "cp1254", "x-cp1254", "windows-1254", "cp1253", "x-cp1253", "windows-1253", "cp1255", "x-cp1255", "windows-1255", "cp1258", "x-cp1258", "windows-1258"] },
-  { group: "Cyrillic", labels: ["csibm855", "cp855", "855", "ibm855", "csibm866", "cp866", "866", "ibm866", "cskoi8r", "koi", "koi8", "koi8-r", "koi8_r", "koi8-ru", "koi8-u", "csmacintosh", "mac", "macintosh", "x-mac-cyrillic", "x-mac-ukrainian", "x-mac-russian"] },
-  { group: "Mac Roman family", labels: ["macroman", "x-mac-roman", "mac-roman", "x-mac-centraleurroman", "x-mac-greek", "x-mac-turkish", "x-mac-icelandic", "x-mac-croatian", "x-mac-romanian"] },
-  { group: "Japanese", labels: ["cseucpkdfmtjapanese", "euc-jp", "x-euc-jp", "csiso2022jp", "iso-2022-jp", "shift-jis", "ms932", "ms_kanji", "sjis", "x-sjis", "csshiftjis", "windows-31j", "x-ms-cp932", "cp932"] },
-  { group: "Chinese", labels: ["csgb2312", "gb2312", "gb_2312", "gb_2312-80", "gbk", "ms936", "x-gbk", "gb18030", "big5", "big5-hkscs", "cn-big5", "csbig5", "x-x-big5", "x-big5"] },
-  { group: "Korean", labels: ["cseuckr", "euc-kr", "iso-ir-149", "korean", "ks_c_5601", "ks_c_5601-1987", "ksc5601", "ksc_5601", "windows-949", "csiso2022kr", "iso-2022-kr"] },
-  { group: "Thai / Vietnamese / other", labels: ["dos-874", "iso-8859-11", "iso8859-11", "iso885911", "tis-620", "windows-874", "cp874", "x-user-defined", "x-dos-cp874"] },
-  { group: "IBM / DOS legacy", labels: ["cp437", "ibm437", "437", "cspc8codepage437", "cp850", "ibm850", "850", "cspc850multilingual", "cp852", "ibm852", "852", "cp858", "cp860", "ibm860", "860", "cp861", "ibm861", "861", "cp862", "ibm862", "862", "cspc862latinhebrew", "cp863", "ibm863", "863", "cp864", "ibm864", "864", "csibm864", "cp865", "ibm865", "865"] },
-];
 
 /** Count of distinct charset labels supported at runtime by TextDecoder. */
 export function countSupportedEncodings(labels: string[]): number {

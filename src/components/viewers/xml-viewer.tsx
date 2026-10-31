@@ -6,6 +6,7 @@ import {
   ViewerToolbar, ToolButton, ToolbarDivider, ViewerBody, ErrorCard, LoadingState, Segmented, Chip,
 } from "./viewer-ui";
 import { cn, formatNum } from "@/lib/utils";
+import { decodeUnicode } from "@/lib/text-reader";
 import { Code2, ChevronDown, ChevronRight, Search, Copy, ListTree, Braces } from "lucide-react";
 
 const MAX_XML = 4 * 1024 * 1024;
@@ -57,7 +58,7 @@ export default function XmlViewer({ arrayBuffer, head, fileName }: ViewerProps) 
 
   React.useEffect(() => {
     const bytes = (arrayBuffer ? new Uint8Array(arrayBuffer) : head).subarray(0, MAX_XML);
-    let text = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+    let text = decodeUnicode(bytes);
     if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
     setRaw(text);
     try {

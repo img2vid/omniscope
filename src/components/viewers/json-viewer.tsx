@@ -6,6 +6,7 @@ import {
   ViewerToolbar, ToolButton, ToolbarDivider, ViewerBody, ErrorCard, LoadingState, Segmented, Chip,
 } from "./viewer-ui";
 import { cn, formatBytes, formatNum, downloadBlob } from "@/lib/utils";
+import { decodeUnicode } from "@/lib/text-reader";
 import { Braces, ChevronDown, ChevronRight, Search, Copy, Download, Brackets, Hash, Binary, Table } from "lucide-react";
 
 type Json = string | number | boolean | null | Json[] | { [k: string]: Json };
@@ -81,7 +82,7 @@ export default function JsonViewer({ file, arrayBuffer, head, fileName }: Viewer
   React.useEffect(() => {
     const bytes = arrayBuffer ? new Uint8Array(arrayBuffer) : head;
     const src = bytes.subarray(0, MAX_JSON_BYTES);
-    let text = new TextDecoder("utf-8", { fatal: false }).decode(src);
+    let text = decodeUnicode(src);
     if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
     setRaw(text);
     try {

@@ -1,4 +1,4 @@
-import { parseHexPattern } from "@/lib/utils";
+import { parseHexPattern } from "@/lib/byte-pattern";
 
 export interface Signature {
   /** hex bytes, "?? " wildcards, e.g. "52 49 46 46 ?? ?? ?? ?? 57 45 42 50" */

@@ -10,7 +10,10 @@
     "db:push": "prisma db push --accept-data-loss",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
-    "db:reset": "prisma migrate reset"
+    "db:reset": "prisma migrate reset",
+    "formats:generate": "node scripts/generate-format-catalog.mjs",
+    "formats:report": "node --import ./tests/register-typescript.mjs scripts/report-format-coverage.mjs",
+    "test:formats": "node scripts/generate-format-catalog.mjs --check && node --import ./tests/register-typescript.mjs scripts/report-format-coverage.mjs --check && node --import ./tests/register-typescript.mjs --test tests/formats.test.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

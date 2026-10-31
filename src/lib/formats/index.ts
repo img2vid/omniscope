@@ -11,6 +11,8 @@ import { EXTRA_FORMATS_H } from "./extra-formats-h";
 import { EXTRA_FORMATS_I } from "./extra-formats-i";
 import { EXTRA_FORMATS_J } from "./extra-formats-j";
 import { EXTRA_FORMATS_K } from "./extra-formats-k";
+import { EXTRA_FORMATS_L } from "./extra-formats-l";
+import { SOURCED_FORMATS } from "./sourced-formats";
 import { generateConventionFormats } from "./conventions";
 import { generateFamilyFormats } from "./families";
 
@@ -31,38 +33,54 @@ const ALL_RAW: RawFormat[] = [
   ...EXTRA_FORMATS_I,
   ...EXTRA_FORMATS_J,
   ...EXTRA_FORMATS_K,
+  ...EXTRA_FORMATS_L,
   ...generateConventionFormats(),
   ...generateFamilyFormats(),
+  // Existing mappings keep priority over every imported alias.
+  ...SOURCED_FORMATS,
 ];
 
 /** Merge format sources → records + lookup maps. Extension duplicates: first wins. */
 function buildIndex(raw: RawFormat[]): {
   records: FormatRecord[];
   extMap: Map<string, FormatRecord>;
+  filenameMap: Map<string, FormatRecord>;
   keyMap: Map<string, FormatRecord>;
   sigRecords: FormatRecord[];
 } {
   const records: FormatRecord[] = [];
   const extMap = new Map<string, FormatRecord>();
+  const filenameMap = new Map<string, FormatRecord>();
   const keyMap = new Map<string, FormatRecord>();
   const sigRecords: FormatRecord[] = [];
+  // Preserve previously reachable lowercase mappings when an old table also
+  // contains a capitalized spelling for a different format.
+  const explicitLowercase = new Set(raw.flatMap(r => r.ext.filter(e => e === e.toLowerCase().replace(/^\./, ""))));
 
   for (const r of raw) {
-    const rec: FormatRecord = { ...r, key: r.ext[0] ?? slug(r.name) };
+    const ext = [...new Set(r.ext.map(e => e.toLowerCase().replace(/^\./, "")))];
+    const rec: FormatRecord = { ...r, ext, key: ext[0] ?? (r.filenames?.[0] ? `filename:${r.filenames[0]}` : slug(r.name)) };
     records.push(rec);
     if (!keyMap.has(rec.key)) keyMap.set(rec.key, rec);
-    for (const e of r.ext) {
+    for (const original of r.ext) {
+      const e = original.toLowerCase().replace(/^\./, "");
+      if (original !== e && explicitLowercase.has(e)) continue;
       if (!extMap.has(e)) extMap.set(e, rec);
+    }
+    for (const filename of r.filenames ?? []) {
+      if (!filenameMap.has(filename)) filenameMap.set(filename, rec);
     }
     if (rec.sig) sigRecords.push(rec);
   }
-  return { records, extMap, keyMap, sigRecords };
+  return { records, extMap, filenameMap, keyMap, sigRecords };
 }
 
 const index = buildIndex(ALL_RAW);
 
 export const FORMAT_RECORDS: FormatRecord[] = index.records;
 export const EXT_MAP: Map<string, FormatRecord> = index.extMap;
+export const MAX_EXTENSION_LENGTH = Math.max(0, ...[...EXT_MAP.keys()].map(e => e.length));
+export const FILENAME_MAP: Map<string, FormatRecord> = index.filenameMap;
 export const KEY_MAP: Map<string, FormatRecord> = index.keyMap;
 export const SIG_RECORDS: FormatRecord[] = index.sigRecords;
 
@@ -74,6 +92,10 @@ export function findByExt(ext?: string | null): FormatRecord | undefined {
 export function findByKey(key?: string | null): FormatRecord | undefined {
   if (!key) return undefined;
   return KEY_MAP.get(key);
+}
+
+export function findByFilename(name: string): FormatRecord | undefined {
+  return FILENAME_MAP.get(name.split(/[\\/]/).pop() ?? name);
 }
 
 export const CATEGORY_LABELS: Record<string, string> = {

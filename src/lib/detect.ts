@@ -1,7 +1,8 @@
 import type { DetectedFormat, FormatRecord } from "@/lib/types";
 import { matchSignatures, matchRecordSignature } from "@/lib/formats/signatures";
-import { findByExt, findByKey, EXT_MAP } from "@/lib/formats";
-import { isLikelyValidUtf8, printabilityRatio, toHex } from "@/lib/utils";
+import { findByExt, findByKey, findByFilename, EXT_MAP, MAX_EXTENSION_LENGTH } from "@/lib/formats";
+import { toHex } from "@/lib/byte-pattern";
+import { probeText } from "@/lib/text-probe";
 import { findAscii, u32le } from "@/lib/binary";
 
 const UNKNOWN: DetectedFormat = {
@@ -10,19 +11,15 @@ const UNKNOWN: DetectedFormat = {
 };
 
 export function getExt(name: string): string | undefined {
-  // two-segment compound conventions (tar.gz, env.production, d.ts, min.js …)
-  const m = /\.([a-z0-9]+\.[a-z0-9-]+)$/i.exec(name);
-  if (m) {
-    const compound = m[1].toLowerCase();
-    if (EXT_MAP.has(compound)) return compound;
-    const tar = /\.(tar)\.([a-z0-9]+)$/i.exec(name);
-    if (tar) return `tar.${tar[2].toLowerCase()}`;
-    const state = /\.(state)\.([a-z0-9]+)$/i.exec(name);
-    if (state) return `state.${state[2].toLowerCase()}`;
+  const base = (name.split(/[\\/]/).pop() ?? name).toLowerCase();
+  // Longest documented suffix, including punctuation and three or more segments.
+  // Never synthesize an unregistered tar.*, state.*, or arbitrary compound name.
+  for (let dot = base.indexOf('.', Math.max(0, base.length - MAX_EXTENSION_LENGTH - 1)); dot >= 0; dot = base.indexOf('.', dot + 1)) {
+    const suffix = base.slice(dot + 1);
+    if (EXT_MAP.has(suffix)) return suffix;
   }
-  const i = name.lastIndexOf(".");
-  if (i <= 0 || i === name.length - 1) return undefined;
-  return name.slice(i + 1).toLowerCase();
+  const i = base.lastIndexOf('.');
+  return i > 0 && i < base.length - 1 ? base.slice(i + 1) : undefined;
 }
 
 /* ------------------------- container sniffing ------------------------- */
@@ -127,7 +124,8 @@ function sniffCfb(head: Uint8Array): { key: string } | null {
 export function detectFromHead(name: string, head: Uint8Array): DetectedFormat {
   if (!head || head.length === 0) return { ...UNKNOWN, name: "Empty file", viewer: "text", cat: "text" };
   const ext = getExt(name);
-  const extRecord = findByExt(ext);
+  const filenameRecord = findByFilename(name);
+  const extRecord = filenameRecord ?? findByExt(ext);
   const conflicts: string[] = [];
 
   // 1) magic signatures
@@ -139,6 +137,9 @@ export function detectFromHead(name: string, head: Uint8Array): DetectedFormat {
   for (const m of sigMatches) {
     const hex = m.sig.pattern.replace(/\?\?/g, "·");
     let rec = findByKey(m.sig.key);
+    // Imported suffixes are not signature identities: .nc source code is not
+    // NetCDF, and .mdx source text is not a binary Warcraft model.
+    if (rec?.source) rec = undefined;
     // deeper container sniffing for zip / cfb
     if (m.sig.key === "zip" || (m.sig.key !== "zip" && m.sig.pattern === "50 4B 03 04")) {
       const z = sniffZip(head, name);
@@ -183,7 +184,7 @@ export function detectFromHead(name: string, head: Uint8Array): DetectedFormat {
     let resolved = chosen;
     const genericXml =
       (chosen.key === "xml" || chosen.viewer === "xml") && sigMatches.every((m) => m.sig.key === "xml");
-    if (genericXml && extRecord && extRecord.viewer !== "xml") {
+    if (genericXml && extRecord && (extRecord.textOnly || ["xml", "svg", "map", "code", "text"].includes(extRecord.viewer))) {
       resolved = extRecord;
     }
     if (extRecord && extRecord.key !== resolved.key) conflicts.push(`${extRecord.name} (from extension .${ext})`);
@@ -212,61 +213,74 @@ export function detectFromHead(name: string, head: Uint8Array): DetectedFormat {
 
   // 3) extension
   if (extRecord) {
+    const text = probeText(head);
+    if (extRecord.textOnly && !text) {
+      return {
+        record: extRecord, name: extRecord.name, cat: "binary", viewer: "hex",
+        mime: "application/octet-stream", method: filenameRecord ? "filename" : "extension", ext,
+        desc: "This alias expects text, but the supplied bytes are binary or use an unrecognized encoding. Showing bytes instead.",
+      };
+    }
+    if ((extRecord.viewer === "fallback" || extRecord.viewer === "hex") && text) {
+      return { ...detectTextContent(text.text, ext), record: extRecord,
+        name: `${extRecord.name} (text content)`,
+        desc: "Text content detected. The proprietary format's semantics are not decoded." };
+    }
     return {
       record: extRecord, name: extRecord.name, cat: extRecord.cat, viewer: extRecord.viewer,
       mime: extRecord.mime ?? "application/octet-stream", desc: extRecord.desc,
-      method: "extension", ext,
+      method: filenameRecord ? "filename" : "extension", ext,
     };
   }
 
   // 4) content sniffing for text-like data
-  const printable = printabilityRatio(head);
-  const validUtf8 = isLikelyValidUtf8(head);
-  if (printable > 0.85 && validUtf8) {
-    const text = new TextDecoder("utf-8", { fatal: false }).decode(head.subarray(0, Math.min(head.length, 2048)));
-    const t = text.trimStart();
-    if (t.startsWith("{") || t.startsWith("[")) {
-      try {
-        JSON.parse(t.length > 100 ? t.slice(0, 100) + (t.endsWith("}") ? "" : "") : t);
-        return { record: null, name: "JSON data (detected)", cat: "data", viewer: "json", mime: "application/json", method: "content", ext };
-      } catch { /* not json */ }
-      if (/^\s*[\{\[]/.test(t) && (t.includes(":") || t.includes(","))) {
-        return { record: null, name: "JSON-like data", cat: "data", viewer: "json", mime: "text/plain", method: "content", ext };
-      }
-    }
-    if (t.startsWith("<")) {
-      if (/^<svg/i.test(t)) return { record: null, name: "SVG image (detected)", cat: "image", viewer: "svg", mime: "image/svg+xml", method: "content", ext };
-      if (/^<(\?xml|rss|feed|kml|gpx|xhtml|html|!doctype html)/i.test(t)) {
-        const isHtml = /^<(!doctype|html)/i.test(t.replace(/\s+/g, " "));
-        return {
-          record: null, name: isHtml ? "HTML document (detected)" : "XML document (detected)",
-          cat: isHtml ? "document" : "data", viewer: isHtml ? "code" : "xml",
-          mime: isHtml ? "text/html" : "application/xml", method: "content", ext,
-        };
-      }
-    }
-    if (t.startsWith("#!")) {
-      const line1 = t.split("\n")[0];
-      const interp = line1.replace("#!", "").trim();
-      return { record: null, name: `Script (${interp || "shebang"})`, cat: "code", viewer: "code", mime: "text/x-shellscript", method: "content", ext };
-    }
-    if (t.startsWith(";;") || t.startsWith(";")) {
-      return { record: null, name: "INI-like configuration", cat: "config", viewer: "code", mime: "text/plain", method: "content", ext };
-    }
-    // CSV sniff: consistent delimiter counts across first lines
-    const lines = t.split(/\r?\n/).filter(Boolean).slice(0, 5);
-    if (lines.length >= 2) {
-      for (const d of [",", "\t", ";", "|"]) {
-        const counts = lines.map((l) => l.split(d).length - 1);
-        if (counts[0] > 0 && counts.every((c) => c === counts[0])) {
-          return { record: null, name: `Delimited text (${d === "\t" ? "TSV" : d === "," ? "CSV" : d === ";" ? "semicolon" : "pipe"})`, cat: "data", viewer: "csv", mime: "text/csv", method: "content", ext };
-        }
-      }
-    }
-    return { record: null, name: "Plain text (detected)", cat: "text", viewer: "text", mime: "text/plain", method: "content", ext };
-  }
+  const text = probeText(head);
+  if (text) return detectTextContent(text.text, ext);
 
   // 5) unknown binary
   const headHex = toHex(head.subarray(0, Math.min(8, head.length)));
   return { ...UNKNOWN, magicHex: headHex, ext };
+}
+
+function detectTextContent(text: string, ext?: string): DetectedFormat {
+  const t = text.trimStart();
+  if (t.startsWith("{") || t.startsWith("[")) {
+    try {
+      JSON.parse(t);
+      return { record: null, name: "JSON data (detected)", cat: "data", viewer: "json", mime: "application/json", method: "content", ext };
+    } catch { /* not json */ }
+    if (/^\s*[\{\[]/.test(t) && (t.includes(":") || t.includes(","))) {
+      return { record: null, name: "JSON-like data", cat: "data", viewer: "json", mime: "text/plain", method: "content", ext };
+    }
+  }
+  if (t.startsWith("<")) {
+    if (/^<svg/i.test(t)) return { record: null, name: "SVG image (detected)", cat: "image", viewer: "svg", mime: "image/svg+xml", method: "content", ext };
+    if (/^<(\?xml|rss|feed|kml|gpx|xhtml|html|!doctype html)/i.test(t)) {
+      const isHtml = /^<(!doctype|html)/i.test(t.replace(/\s+/g, " "));
+      return {
+        record: null, name: isHtml ? "HTML document (detected)" : "XML document (detected)",
+        cat: isHtml ? "document" : "data", viewer: isHtml ? "code" : "xml",
+        mime: isHtml ? "text/html" : "application/xml", method: "content", ext,
+      };
+    }
+  }
+  if (t.startsWith("#!")) {
+    const line1 = t.split("\n")[0];
+    const interp = line1.replace("#!", "").trim();
+    return { record: null, name: `Script (${interp || "shebang"})`, cat: "code", viewer: "code", mime: "text/x-shellscript", method: "content", ext };
+  }
+  if (t.startsWith(";;") || t.startsWith(";")) {
+    return { record: null, name: "INI-like configuration", cat: "config", viewer: "code", mime: "text/plain", method: "content", ext };
+  }
+  // CSV sniff: consistent delimiter counts across first lines
+  const lines = t.split(/\r?\n/).filter(Boolean).slice(0, 5);
+  if (lines.length >= 2) {
+    for (const d of [",", "\t", ";", "|"]) {
+      const counts = lines.map((l) => l.split(d).length - 1);
+      if (counts[0] > 0 && counts.every((c) => c === counts[0])) {
+        return { record: null, name: `Delimited text (${d === "\t" ? "TSV" : d === "," ? "CSV" : d === ";" ? "semicolon" : "pipe"})`, cat: "data", viewer: "csv", mime: "text/csv", method: "content", ext };
+      }
+    }
+  }
+  return { record: null, name: "Plain text (detected)", cat: "text", viewer: "text", mime: "text/plain", method: "content", ext };
 }

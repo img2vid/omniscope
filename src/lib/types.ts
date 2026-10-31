@@ -16,11 +16,19 @@ export type ViewerId =
 export interface RawFormat {
   /** lowercase file extensions without the leading dot */
   ext: string[];
+  /** Exact basenames, distinct from extensions (e.g. Makefile or .gitignore). */
+  filenames?: string[];
   name: string;
   cat: FormatCategory;
   viewer: ViewerId;
   mime?: string;
   desc?: string;
+  /** Auditable upstream identifier; see data/format-sources/sources.json. */
+  source?: "github-linguist" | "mime-db";
+  /** Reading level for sourced additions. Byte inspection is not a decoder. */
+  reading?: "text" | "decoded" | "inspect";
+  /** Validate text bytes before using a sourced text-only alias. */
+  textOnly?: boolean;
   /** hex magic bytes, bytes separated by spaces, "??" = wildcard, e.g. "89 50 4E 47 0D 0A 1A 0A" */
   sig?: string;
   /** byte offset of the signature (default 0) */
@@ -45,6 +53,7 @@ export type DetectionMethod =
   | "magic"        // matched binary signature
   | "container"    // sniffed inside container (CFB / OOXML / zip directory)
   | "extension"    // matched via file extension
+  | "filename"     // matched an exact documented basename
   | "content"      // sniffed as text / structured content
   | "unknown";
 

@@ -1,20 +1,23 @@
-import { FORMAT_RECORDS, EXT_MAP } from "./index";
+import { FORMAT_RECORDS, EXT_MAP, FILENAME_MAP } from "./index";
 import { SIGNATURES } from "./signatures";
 import { MIME_REGISTRY_ALL } from "./mime-registry-all";
-import { ENCODINGS } from "@/lib/utils";
-import type { FormatCategory } from "@/lib/types";
+import { ENCODINGS } from "@/lib/encodings";
+import type { FormatCategory, RawFormat } from "@/lib/types";
 
 export interface ExplorerRow {
   key: string;
-  kind: "format" | "mime" | "encoding";
+  kind: "format" | "filename" | "mime" | "encoding";
   label: string;
   sub: string;
   cat: FormatCategory;
   viewer: string;
   desc?: string;
+  reading?: RawFormat["reading"];
+  source?: RawFormat["source"];
 }
 
-const EXT_ONLY = FORMAT_RECORDS.flatMap((r) => r.ext.map((e) => ({ e, r })));
+// Show the winning mapping exactly once. Overlapping catalogs are not additions.
+const EXT_ONLY = [...EXT_MAP].map(([e, r]) => ({ e, r }));
 
 const MIME_UNIQUE = (() => {
   const seen = new Set<string>();
@@ -34,17 +37,24 @@ export const FORMAT_STATS = (() => {
     ...SIGNATURES.map((s) => s.key + s.pattern),
     ...FORMAT_RECORDS.filter((r) => r.sig).map((r) => r.key + r.sig),
   ]).size;
-  const encodingLabels = new Set(ENCODINGS.flatMap((g) => g.labels)).size;
+  const encodingLabels = new Set(ENCODINGS.flatMap(g => g.labels).filter(label => {
+    try { new TextDecoder(label); return true; } catch { return false; }
+  })).size;
+  const sourced = [...EXT_MAP.values()].filter(r => r.source);
   return {
     formats: FORMAT_RECORDS.length,
     extensions: EXT_MAP.size,
+    filenames: FILENAME_MAP.size,
+    sourcedTextExtensions: sourced.filter(r => r.reading === "text").length,
+    sourcedDecodedExtensions: sourced.filter(r => r.reading === "decoded").length,
+    sourcedInspectionExtensions: sourced.filter(r => r.reading === "inspect").length,
     mimes: MIME_UNIQUE.length,
     signatures: sigCount,
     encodings: encodingLabels,
     categories: byCat.size,
     byCat: [...byCat.entries()].sort((a, b) => b[1] - a[1]),
     /** total recognized format identities */
-    identities: EXT_MAP.size + MIME_UNIQUE.length + sigCount + encodingLabels,
+    identities: EXT_MAP.size + FILENAME_MAP.size + MIME_UNIQUE.length + sigCount + encodingLabels,
   };
 })();
 
@@ -57,6 +67,12 @@ export const EXPLORER_ROWS: ExplorerRow[] = [
     cat: r.cat,
     viewer: r.viewer,
     desc: r.desc,
+    reading: r.reading,
+    source: r.source,
+  })),
+  ...[...FILENAME_MAP].map(([name, r]) => ({
+    key: `name:${name}`, kind: "filename" as const, label: name, sub: r.name,
+    cat: r.cat, viewer: r.viewer, desc: r.desc, reading: r.reading, source: r.source,
   })),
   ...MIME_UNIQUE.map((m) => ({
     key: `mime:${m.mime}`,
@@ -68,7 +84,7 @@ export const EXPLORER_ROWS: ExplorerRow[] = [
     desc: m.desc,
   })),
   ...ENCODINGS.flatMap((g) =>
-    g.labels.map((l) => ({
+    g.labels.filter(l => { try { new TextDecoder(l); return true; } catch { return false; } }).map((l) => ({
       key: `enc:${l}`,
       kind: "encoding" as const,
       label: l,
