@@ -2,11 +2,11 @@
   "baselineCommit": "cb12ecca3379b43356ca6efaf8d66ce0c4058a0b",
   "requestedAdditionalExtensions": 30001,
   "baselineUniqueExtensions": 5888,
-  "totalUniqueExtensions": 7150,
-  "additionalUniqueExtensions": 1262,
-  "additionalTextReaders": 833,
-  "additionalDecoderRoutes": 8,
-  "additionalInspectionOnly": 421,
+  "totalUniqueExtensions": 7121,
+  "additionalUniqueExtensions": 1233,
+  "additionalTextReaders": 826,
+  "additionalDecoderRoutes": 3,
+  "additionalInspectionOnly": 404,
   "documentedFilenames": 421,
   "targetMet": false,
   "additions": [
@@ -165,13 +165,6 @@
       "reading": "inspect"
     },
     {
-      "extension": "adn",
-      "name": "Access Blank Template",
-      "viewer": "fallback",
-      "source": "existing-table-l",
-      "reading": "inspect"
-    },
-    {
       "extension": "ado",
       "name": "Stata",
       "viewer": "code",
@@ -197,13 +190,6 @@
       "name": "AutoHotkey",
       "viewer": "code",
       "source": "github-linguist",
-      "reading": "text"
-    },
-    {
-      "extension": "aip",
-      "name": "Advanced Installer Project",
-      "viewer": "xml",
-      "source": "existing-table-l",
       "reading": "text"
     },
     {
@@ -239,13 +225,6 @@
       "name": "Aleo",
       "viewer": "code",
       "source": "github-linguist",
-      "reading": "text"
-    },
-    {
-      "extension": "aman",
-      "name": "Advanced Installer Project",
-      "viewer": "xml",
-      "source": "existing-table-l",
       "reading": "text"
     },
     {
@@ -337,13 +316,6 @@
       "name": "text/cache-manifest",
       "viewer": "code",
       "source": "mime-db",
-      "reading": "text"
-    },
-    {
-      "extension": "approj",
-      "name": "Advanced Installer Project",
-      "viewer": "xml",
-      "source": "existing-table-l",
       "reading": "text"
     },
     {
@@ -585,13 +557,6 @@
       "reading": "text"
     },
     {
-      "extension": "bbb",
-      "name": "BlackBerry Backup",
-      "viewer": "fallback",
-      "source": "existing-table-l",
-      "reading": "inspect"
-    },
-    {
       "extension": "bbclass",
       "name": "BitBake",
       "viewer": "code",
@@ -768,17 +733,17 @@
     },
     {
       "extension": "bpk",
-      "name": "Borland Package",
+      "name": "application/octet-stream",
       "viewer": "fallback",
-      "source": "existing-table-l",
+      "source": "mime-db",
       "reading": "inspect"
     },
     {
       "extension": "bpl",
-      "name": "Borland Package Library",
-      "viewer": "exe",
-      "source": "existing-table-l",
-      "reading": "decoded"
+      "name": "Boogie",
+      "viewer": "code",
+      "source": "github-linguist",
+      "reading": "text"
     },
     {
       "extension": "brs",
@@ -893,13 +858,6 @@
       "reading": "text"
     },
     {
-      "extension": "c32",
-      "name": "Syslinux COM32 Module",
-      "viewer": "fallback",
-      "source": "existing-table-l",
-      "reading": "inspect"
-    },
-    {
       "extension": "c4f",
       "name": "application/vnd.clonk.c4group",
       "viewer": "fallback",
@@ -940,13 +898,6 @@
       "viewer": "code",
       "source": "github-linguist",
       "reading": "text"
-    },
-    {
-      "extension": "camproj",
-      "name": "Camtasia Project/Recording",
-      "viewer": "fallback",
-      "source": "existing-table-l",
-      "reading": "inspect"
     },
     {
       "extension": "carbon",
@@ -2017,13 +1968,6 @@
       "name": "application/vnd.picsel",
       "viewer": "fallback",
       "source": "mime-db",
-      "reading": "inspect"
-    },
-    {
-      "extension": "efx",
-      "name": "eFax Document",
-      "viewer": "fallback",
-      "source": "existing-table-l",
       "reading": "inspect"
     },
     {
@@ -3462,13 +3406,6 @@
       "reading": "inspect"
     },
     {
-      "extension": "jnt",
-      "name": "Windows Journal Note",
-      "viewer": "fallback",
-      "source": "existing-table-l",
-      "reading": "inspect"
-    },
-    {
       "extension": "joda",
       "name": "application/vnd.joost.joda-archive",
       "viewer": "fallback",
@@ -3700,13 +3637,6 @@
       "reading": "inspect"
     },
     {
-      "extension": "kfx",
-      "name": "Kindle KFX eBook",
-      "viewer": "fallback",
-      "source": "existing-table-l",
-      "reading": "inspect"
-    },
-    {
       "extension": "kia",
       "name": "application/vnd.kidspiration",
       "viewer": "fallback",
@@ -3830,13 +3760,6 @@
       "name": "application/vnd.kde.kword",
       "viewer": "fallback",
       "source": "mime-db",
-      "reading": "inspect"
-    },
-    {
-      "extension": "laccdb",
-      "name": "Access Lock Database",
-      "viewer": "fallback",
-      "source": "existing-table-l",
       "reading": "inspect"
     },
     {
@@ -4687,13 +4610,6 @@
       "reading": "inspect"
     },
     {
-      "extension": "mydocs",
-      "name": "My Docs Folder",
-      "viewer": "fallback",
-      "source": "existing-table-l",
-      "reading": "inspect"
-    },
-    {
       "extension": "mysql",
       "name": "SQL",
       "viewer": "code",
@@ -4748,20 +4664,6 @@
       "viewer": "code",
       "source": "github-linguist",
       "reading": "text"
-    },
-    {
-      "extension": "nbu",
-      "name": "Nokia Phone Backup",
-      "viewer": "fallback",
-      "source": "existing-table-l",
-      "reading": "inspect"
-    },
-    {
-      "extension": "nco",
-      "name": "Nero BackItUp",
-      "viewer": "fallback",
-      "source": "existing-table-l",
-      "reading": "inspect"
     },
     {
       "extension": "ncx",
@@ -5471,13 +5373,6 @@
       "reading": "text"
     },
     {
-      "extension": "playlist",
-      "name": "Generic Playlist",
-      "viewer": "text",
-      "source": "existing-table-l",
-      "reading": "text"
-    },
-    {
       "extension": "plc",
       "name": "application/vnd.mobius.plc",
       "viewer": "fallback",
@@ -5583,13 +5478,6 @@
       "reading": "text"
     },
     {
-      "extension": "ppu",
-      "name": "Free Pascal Unit",
-      "viewer": "fallback",
-      "source": "existing-table-l",
-      "reading": "inspect"
-    },
-    {
       "extension": "praat",
       "name": "Praat",
       "viewer": "code",
@@ -5681,13 +5569,6 @@
       "reading": "inspect"
     },
     {
-      "extension": "pvm",
-      "name": "Parallels Virtual Machine",
-      "viewer": "fallback",
-      "source": "existing-table-l",
-      "reading": "inspect"
-    },
-    {
       "extension": "pwn",
       "name": "Pawn",
       "viewer": "code",
@@ -5707,13 +5588,6 @@
       "viewer": "fallback",
       "source": "mime-db",
       "reading": "inspect"
-    },
-    {
-      "extension": "pyd",
-      "name": "Python DLL Module",
-      "viewer": "exe",
-      "source": "existing-table-l",
-      "reading": "decoded"
     },
     {
       "extension": "pyox",
@@ -5742,20 +5616,6 @@
       "viewer": "fallback",
       "source": "mime-db",
       "reading": "inspect"
-    },
-    {
-      "extension": "pyz",
-      "name": "Python Zipapp",
-      "viewer": "archive",
-      "source": "existing-table-l",
-      "reading": "decoded"
-    },
-    {
-      "extension": "pyzw",
-      "name": "Python Zipapp",
-      "viewer": "archive",
-      "source": "existing-table-l",
-      "reading": "decoded"
     },
     {
       "extension": "qam",
@@ -5965,13 +5825,6 @@
       "name": "RDoc",
       "viewer": "code",
       "source": "github-linguist",
-      "reading": "text"
-    },
-    {
-      "extension": "rdp",
-      "name": "Remote Desktop Connection",
-      "viewer": "text",
-      "source": "existing-table-l",
       "reading": "text"
     },
     {
@@ -6717,13 +6570,6 @@
       "reading": "text"
     },
     {
-      "extension": "snp",
-      "name": "Access Snapshot",
-      "viewer": "fallback",
-      "source": "existing-table-l",
-      "reading": "inspect"
-    },
-    {
       "extension": "soy",
       "name": "Closure Templates",
       "viewer": "code",
@@ -7305,13 +7151,6 @@
       "reading": "inspect"
     },
     {
-      "extension": "trec",
-      "name": "Camtasia Project/Recording",
-      "viewer": "fallback",
-      "source": "existing-table-l",
-      "reading": "inspect"
-    },
-    {
       "extension": "trg",
       "name": "PLSQL",
       "viewer": "code",
@@ -7788,13 +7627,6 @@
       "reading": "text"
     },
     {
-      "extension": "vbox-prev",
-      "name": "VirtualBox Machine",
-      "viewer": "xml",
-      "source": "existing-table-l",
-      "reading": "text"
-    },
-    {
       "extension": "vcl",
       "name": "VCL",
       "viewer": "code",
@@ -7886,24 +7718,10 @@
       "reading": "text"
     },
     {
-      "extension": "vmtm",
-      "name": "VMware Team Data",
-      "viewer": "fallback",
-      "source": "existing-table-l",
-      "reading": "inspect"
-    },
-    {
       "extension": "volt",
       "name": "Volt",
       "viewer": "code",
       "source": "github-linguist",
-      "reading": "text"
-    },
-    {
-      "extension": "volume",
-      "name": "KDE Plasma Service File",
-      "viewer": "text",
-      "source": "existing-table-l",
       "reading": "text"
     },
     {
@@ -8024,13 +7842,6 @@
       "viewer": "code",
       "source": "github-linguist",
       "reading": "text"
-    },
-    {
-      "extension": "wbcat",
-      "name": "Windows Backup Catalog",
-      "viewer": "fallback",
-      "source": "existing-table-l",
-      "reading": "inspect"
     },
     {
       "extension": "wbs",
@@ -8775,13 +8586,6 @@
       "reading": "text"
     },
     {
-      "extension": "zfsendtotarget",
-      "name": "Compressed Folder SendTo",
-      "viewer": "archive",
-      "source": "existing-table-l",
-      "reading": "decoded"
-    },
-    {
       "extension": "zig.zon",
       "name": "Zig",
       "viewer": "code",
@@ -8835,13 +8639,6 @@
       "name": "ZenScript",
       "viewer": "code",
       "source": "github-linguist",
-      "reading": "text"
-    },
-    {
-      "extension": "zsync",
-      "name": "Zsync Control File",
-      "viewer": "text",
-      "source": "existing-table-l",
       "reading": "text"
     }
   ]

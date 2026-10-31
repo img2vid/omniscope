@@ -46,10 +46,13 @@ test('every added source suffix is traceable to a snapshot; no numeric padding',
     'github-linguist': new Set(linguist.flatMap(l => l.extensions ?? []).map(e => e.replace(/^\./, '').toLowerCase())),
     'mime-db': new Set(Object.values(mime).flatMap(m => m.extensions ?? []).map(e => e.toLowerCase())),
   };
-  for (const [ext, r] of added) if (r.source) assert.ok(documented[r.source].has(ext), ext);
-  assert.equal(added.filter(([, r]) => r.source).length, 1231);
-  assert.equal(added.length, 1262);
-  assert.equal(EXT_MAP.size, 7150);
+  for (const [ext, r] of added) {
+    assert.ok(r.source, ext);
+    assert.ok(documented[r.source].has(ext), ext);
+  }
+  assert.equal(added.filter(([, r]) => r.source).length, 1233);
+  assert.equal(added.length, 1233);
+  assert.equal(EXT_MAP.size, 7121);
   assert.equal(findByExt('invented30001'), undefined);
   assert.equal(findByExt('a000001'), undefined);
 });
@@ -75,7 +78,7 @@ test('each new text alias routes readable Unicode; JSON/XML aliases get valid st
     assert.equal(decodeUnicode(bytes), text, ext);
     checked++;
   }
-  assert.equal(checked, 825);
+  assert.equal(checked, 826);
 });
 
 test('imported text aliases do not force binary bytes into text parsers', () => {
@@ -89,7 +92,7 @@ test('imported text aliases do not force binary bytes into text parsers', () => 
 test('inspection-only entries stay separate from decoders', () => {
   const binary = Uint8Array.of(0x99, 0xff, 0x8b, 0x00, 0x01, 0x02);
   const inspection = added.filter(([, r]) => r.reading === 'inspect');
-  assert.equal(inspection.length, 403);
+  assert.equal(inspection.length, 404);
   for (const [ext] of inspection) assert.equal(detectFromHead('sample.' + ext, binary).viewer, 'fallback', ext);
 });
 
@@ -166,9 +169,9 @@ test('explorer has unique keys and separates filenames, extensions, and byte ins
   assert.equal(new Set(EXPLORER_ROWS.map(r => r.key)).size, EXPLORER_ROWS.length);
   assert.equal(EXPLORER_ROWS.filter(r => r.kind === 'format').length, EXT_MAP.size);
   assert.equal(EXPLORER_ROWS.filter(r => r.kind === 'filename').length, FILENAME_MAP.size);
-  assert.equal(FORMAT_STATS.sourcedTextExtensions, 830);
+  assert.equal(FORMAT_STATS.sourcedTextExtensions, 831);
   assert.equal(FORMAT_STATS.sourcedDecodedExtensions, 3);
-  assert.equal(FORMAT_STATS.sourcedInspectionExtensions, 403);
+  assert.equal(FORMAT_STATS.sourcedInspectionExtensions, 404);
   for (const row of EXPLORER_ROWS.filter(r => r.kind === 'encoding')) assert.doesNotThrow(() => new TextDecoder(row.label));
   assert.ok(SOURCED_FORMATS.every(r => r.source && r.reading));
 });

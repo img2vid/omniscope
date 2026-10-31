@@ -1,17 +1,17 @@
 # File-reading coverage
 
 The requested **over 30,000 additional, genuinely existing extensions is not met**.
-This change adds **1,262 distinct documented suffixes** relative to upstream
+This change adds **1,233 distinct documented suffixes** relative to upstream
 `cb12ecca3379b43356ca6efaf8d66ce0c4058a0b`, after case normalization:
 
 | Addition | Count | What is provided |
 | --- | ---: | --- |
-| Text-reader routes | 833 | Decode and display source text; JSON/XML aliases use their structured viewers |
-| Routes to existing binary readers | 8 | Existing executable, ZIP, and MPEG-audio viewers; valid compatible payloads are required |
-| Inspection only | 421 | Identify the extension and inspect its bytes; no format-specific decoder is claimed |
-| Total new suffixes | 1,262 | Not 1,262 independently implemented parsers |
+| Text-reader routes | 826 | Decode and display source text; JSON/XML aliases use their structured viewers |
+| Routes to existing binary readers | 3 | Existing MPEG-audio viewer; valid compatible payloads are required |
+| Inspection only | 404 | Identify the extension and inspect its bytes; no format-specific decoder is claimed |
+| Total new suffixes | 1,233 | Not 1,233 independently implemented parsers |
 
-The resulting registry contains **7,150 unique suffixes**, plus **421 exact
+The resulting registry contains **7,121 unique suffixes**, plus **421 exact
 basenames**, including `Makefile`, `.gitignore`, and application configuration
 filenames. Basenames, MIME identities, encodings, signatures, duplicate aliases,
 and generated filename combinations are not counted as new extensions.
@@ -29,11 +29,10 @@ extension's name, MIME identity, and default reader.
 - [Snapshot SHA-256 checksums](../data/format-sources/snapshot-hashes.json)
 - [Upstream license notices](../third_party/)
 
-GitHub Linguist supplies 710 genuinely new text suffixes. MIME-db supplies
-another 115 text suffixes, 3 MPEG-audio aliases, and 403 inspection-only suffixes.
-Registering the previously disconnected `extra-formats-l.ts` table supplies the
-remaining 31 extensions. No synthesized numeric families or Cartesian products
-were added to reach a numeric target.
+GitHub Linguist supplies 711 genuinely new text suffixes. MIME-db supplies
+another 115 text suffixes, 3 MPEG-audio aliases, and 404 inspection-only suffixes.
+Every newly added suffix belongs to a pinned source snapshot. No synthesized
+numeric families or Cartesian products were added to reach a numeric target.
 
 The snapshots retain the source extension spellings before normalization. The
 Linguist snapshot includes only `name`, `type`, `extensions`, and `filenames`;

@@ -11,7 +11,6 @@ import { EXTRA_FORMATS_H } from "./extra-formats-h";
 import { EXTRA_FORMATS_I } from "./extra-formats-i";
 import { EXTRA_FORMATS_J } from "./extra-formats-j";
 import { EXTRA_FORMATS_K } from "./extra-formats-k";
-import { EXTRA_FORMATS_L } from "./extra-formats-l";
 import { SOURCED_FORMATS } from "./sourced-formats";
 import { generateConventionFormats } from "./conventions";
 import { generateFamilyFormats } from "./families";
@@ -33,7 +32,6 @@ const ALL_RAW: RawFormat[] = [
   ...EXTRA_FORMATS_I,
   ...EXTRA_FORMATS_J,
   ...EXTRA_FORMATS_K,
-  ...EXTRA_FORMATS_L,
   ...generateConventionFormats(),
   ...generateFamilyFormats(),
   // Existing mappings keep priority over every imported alias.
